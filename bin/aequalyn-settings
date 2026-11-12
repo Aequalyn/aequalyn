@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# aequalyn-settings -- read and write ~/.config/aequalyn/settings.json.
+#
+# Usage:
+#   aequalyn-settings get <path> [default]     e.g. get .wallpaper.mode static
+#   aequalyn-settings set <path> <json>        e.g. set .wallpaper.interval 30
+#                                                   set .wallpaper.mode '"slideshow"'
+#   aequalyn-settings set-str <path> <string>  e.g. set-str .wallpaper.folder ~/Art
+#   aequalyn-settings del <path>
+#   aequalyn-settings path                     print the file location
+#
+# Writes are atomic (temp file + rename). The shell live-reloads the file, so
+# every change made here shows up in the Settings page and Atelier at once.
+set -euo pipefail
+
+FILE="${XDG_CONFIG_HOME:-$HOME/.config}/aequalyn/settings.json"
+
+die() { printf 'aequalyn-settings: %s\n' "$*" >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || die "jq is required"
+
+write() { # write <jq-filter> [jq args...]
+    local filter=$1; shift
+    mkdir -p "$(dirname "$FILE")"
+    [[ -s "$FILE" ]] || printf '{}' > "$FILE"
+    local tmp
+    tmp=$(mktemp "${FILE}.XXXXXX")
+    if jq "$@" "$filter" "$FILE" > "$tmp"; then
+        mv "$tmp" "$FILE"
+    else
+        rm -f "$tmp"
+        die "could not update $FILE"
+    fi
+}
+
+cmd=${1:-}
+case "$cmd" in
+    get)
+        [[ $# -ge 2 ]] || die "usage: get <path> [default]"
+        val=""
+        [[ -f "$FILE" ]] && val=$(jq -r "$2 // empty" "$FILE" 2>/dev/null || true)
+        printf '%s\n' "${val:-${3:-}}"
+        ;;
+    set)
+        [[ $# -ge 3 ]] || die "usage: set <path> <json>"
+        printf '%s' "$3" | jq . >/dev/null 2>&1 || die "not valid JSON: $3 (use set-str for plain text)"
+        write "$2 = \$v" --argjson v "$3"
+        ;;
+    set-str)
+        [[ $# -ge 3 ]] || die "usage: set-str <path> <string>"
+        write "$2 = \$v" --arg v "$3"
+        ;;
+    del)
+        [[ $# -ge 2 ]] || die "usage: del <path>"
+        write "del($2)"
+        ;;
+    path)
+        printf '%s\n' "$FILE"
+        ;;
+    -h|--help|"")
+        sed -n '2,13p' "$0"
+        ;;
+    *)
+        die "unknown command: $cmd"
+        ;;
+esac
