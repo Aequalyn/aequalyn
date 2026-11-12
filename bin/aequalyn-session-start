@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# aequalyn-session-start -- Hyprland autostart glue for the Aequalyn desktop.
+# Called once from hyprland.lua via `exec-once = aequalyn-session-start`.
+set -u
+export PATH="$HOME/.local/bin:$PATH"
+
+log() { printf '[aequalyn-session] %s\n' "$*" >> "${XDG_STATE_HOME:-$HOME/.local/state}/aequalyn/session.log" 2>/dev/null || true; }
+mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/aequalyn" 2>/dev/null || true
+
+# 1. Desktop services (Polkit, portals, keyring)
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl --user start hyprpolkitagent.service           >/dev/null 2>&1 || true
+    systemctl --user start xdg-desktop-portal-hyprland.service >/dev/null 2>&1 || true
+    systemctl --user start xdg-desktop-portal-gtk.service     >/dev/null 2>&1 || true
+fi
+
+# A leftover hyprpaper from a previous Hyprland setup would fight awww for the
+# background layer (and keep an old wallpaper on screen). Aequalyn owns wallpapers.
+if pgrep -x hyprpaper >/dev/null 2>&1; then
+    pkill -x hyprpaper 2>/dev/null || true
+    log "stopped leftover hyprpaper"
+fi
+
+# 2. Wallpaper daemon
+if command -v awww-daemon >/dev/null 2>&1; then
+    pgrep -x awww-daemon >/dev/null 2>&1 || { awww-daemon >/dev/null 2>&1 & }
+    sleep 0.5
+fi
+
+# 3. Restore what was showing: an image, a theme background or a live video,
+#    on every output. aequalyn-wallpaper regenerates the systemwide palette
+#    only when colours follow the wallpaper (a fixed theme re-applies itself
+#    when the shell starts).
+if command -v aequalyn-wallpaper >/dev/null 2>&1; then
+    aequalyn-wallpaper restore >/dev/null 2>&1 || log "wallpaper restore failed"
+elif command -v aequalyn-theme >/dev/null 2>&1; then
+    aequalyn-theme >/dev/null 2>&1 || log "aequalyn-theme failed"
+fi
+
+# 4. The shell itself (QuickShell auto-reloads on config changes)
+if command -v qs >/dev/null 2>&1; then
+    pgrep -f '/bin/qs' >/dev/null 2>&1 || qs -n -d >/dev/null 2>&1 || log "quickshell failed to start"
+fi
+
+# 5. Idle / lock -- aequalyn-idle generates the hypridle config from the user's
+#    Power settings (lock / display-off / suspend can each be disabled).
+if command -v aequalyn-idle >/dev/null 2>&1; then
+    aequalyn-idle >/dev/null 2>&1 || log "aequalyn-idle failed"
+elif command -v hypridle >/dev/null 2>&1; then
+    pgrep -x hypridle >/dev/null 2>&1 || hypridle >/dev/null 2>&1 &
+fi
+
+log "session started at $(date '+%F %T')"
