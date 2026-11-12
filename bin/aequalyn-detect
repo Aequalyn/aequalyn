@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Wrapper for the Aequalyn hardware/profile detector (lives in installer/ in the source tree).
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -x "$SELF_DIR/../installer/aequalyn-detect" ]]; then
+    exec bash "$SELF_DIR/../installer/aequalyn-detect" "$@"
+elif [[ -x /opt/aequalyn/installer/aequalyn-detect ]]; then
+    exec bash /opt/aequalyn/installer/aequalyn-detect "$@"
+else
+    echo "aequalyn-detect: detector not found" >&2
+    exit 1
+fi
