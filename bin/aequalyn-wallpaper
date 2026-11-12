@@ -1,0 +1,480 @@
+#!/usr/bin/env bash
+# aequalyn-wallpaper -- wallpapers, rotation modes and live backgrounds.
+#
+# Usage:
+#   aequalyn-wallpaper <file>                   same as `set <file>`
+#   aequalyn-wallpaper set <file> [--no-palette] [--output NAME]
+#   aequalyn-wallpaper next | prev | random     step through the active pool
+#   aequalyn-wallpaper mode [MODE]              print or change the mode
+#   aequalyn-wallpaper tick                     timed work; the shell calls it every minute
+#   aequalyn-wallpaper workspace <id>           workspace changed (per-workspace mode)
+#   aequalyn-wallpaper assign <workspace> <file>
+#   aequalyn-wallpaper generate <solid|gradient|aurora|dusk> [#hex ...]
+#   aequalyn-wallpaper list [--all] [--json]    the active pool (or every wallpaper)
+#   aequalyn-wallpaper restore                  login: bring back what was showing
+#   aequalyn-wallpaper status                   JSON state
+#
+# Modes (settings.json -> .wallpaper.mode):
+#   static     one wallpaper until you pick another
+#   theme      the active theme's backgrounds; next/prev cycle them
+#   slideshow  rotate through .wallpaper.folder every .wallpaper.interval minutes
+#   daytime    dawn / day / dusk / night sets, switched by the clock
+#   workspace  every workspace has its own wallpaper
+#   live       video wallpapers through mpvpaper
+#
+# Images go through awww with the configured transition, on every output.
+# Unless the palette is locked or a fixed theme is active, each change
+# regenerates the systemwide palette with aequalyn-theme.
+set -uo pipefail
+
+CONF="${XDG_CONFIG_HOME:-$HOME/.config}"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/aequalyn"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/aequalyn"
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}/aequalyn"
+STATE="$STATE_DIR/wallpaper.json"
+WALL_CONF="$CONF/quickshell/wallpaper.conf"
+THEME_CONF="$CONF/quickshell/theme.conf"
+SETTINGS="$CONF/aequalyn/settings.json"
+CURRENT_THEME="$CONF/aequalyn/current/theme"
+mkdir -p "$CACHE/thumbs" "$STATE_DIR" "$DATA/generated" "$CONF/quickshell"
+
+IMAGE_RE='.*\.(jpe?g|png|webp|bmp|gif)$'
+VIDEO_RE='.*\.(mp4|webm|mkv|mov)$'
+MEDIA_RE='.*\.(jpe?g|png|webp|bmp|gif|mp4|webm|mkv|mov)$'
+
+log()  { printf '\033[0;34m[aequalyn-wallpaper]\033[0m %s\n' "$*" >&2; }
+warn() { printf '\033[1;33m[aequalyn-wallpaper]\033[0m %s\n' "$*" >&2; }
+die()  { warn "$*"; exit 1; }
+command -v jq >/dev/null 2>&1 || die "jq is required"
+
+# ------------------------------------------------------------------ config ---
+setting() { # setting <jq-path> <default>
+    local v=""
+    [[ -f "$SETTINGS" ]] && v=$(jq -r "$1 // empty" "$SETTINGS" 2>/dev/null || true)
+    printf '%s' "${v:-$2}"
+}
+expand() { local p=$1; [[ "$p" == "~"* ]] && p="$HOME${p:1}"; printf '%s' "$p"; }
+
+MODE=$(setting .wallpaper.mode static)
+FOLDER=$(expand "$(setting .wallpaper.folder "$HOME/Pictures/Wallpapers")")
+INTERVAL=$(setting .wallpaper.interval 30)
+ORDER=$(setting .wallpaper.order shuffle)                 # shuffle | sequential
+OUTPUTS_MODE=$(setting .wallpaper.outputs same)           # same | different
+TRANSITION=$(setting .wallpaper.transition fade)
+DURATION=$(setting .wallpaper.transitionDuration 1)
+FPS=$(setting .wallpaper.transitionFps 60)
+WS_PALETTE=$(setting .wallpaper.workspacePalette false)
+LOCKED=$(setting .palette.locked false)
+
+state_get() { [[ -f "$STATE" ]] && jq -r "$1 // empty" "$STATE" 2>/dev/null || true; }
+state_set() { # state_set <jq-filter> [jq args]
+    local f=$1; shift
+    [[ -s "$STATE" ]] || printf '{}' > "$STATE"
+    local tmp; tmp=$(mktemp "$STATE.XXXXXX")
+    jq "$@" "$f" "$STATE" > "$tmp" && mv "$tmp" "$STATE" || rm -f "$tmp"
+}
+
+is_video() { [[ "${1,,}" =~ \.(mp4|webm|mkv|mov)$ ]]; }
+
+outputs() { # one output name per line
+    if command -v hyprctl >/dev/null 2>&1; then
+        hyprctl monitors -j 2>/dev/null | jq -r '.[].name' 2>/dev/null && return
+    fi
+    command -v awww >/dev/null 2>&1 && awww query 2>/dev/null | sed -n 's/^: \([^:]*\):.*/\1/p'
+}
+
+# ------------------------------------------------------------------- pools ---
+media_in() { # media_in <dir> [regex]
+    [[ -d "$1" ]] || return 0
+    # Skip hidden files and folders below the root (the root itself may
+    # live under a dot-directory such as ~/.local/share).
+    find -L "$1" -maxdepth 3 -type f -regextype posix-extended -iregex "${2:-$MEDIA_RE}" 2>/dev/null \
+        | awk -v r="${1%/}/" 'index($0, r) == 1 && substr($0, length(r) + 1) !~ /(^|\/)\./' | sort -V
+}
+
+theme_backgrounds() {
+    [[ -e "$CURRENT_THEME" ]] || return 0
+    media_in "$(readlink -f "$CURRENT_THEME")/backgrounds"
+}
+
+daytime_phase() { # prints dawn|day|dusk|night for the current hour
+    local h dawn day dusk night
+    h=$((10#$(date +%H)))
+    dawn=$(setting .wallpaper.daytime.dawn 6); day=$(setting .wallpaper.daytime.day 9)
+    dusk=$(setting .wallpaper.daytime.dusk 18); night=$(setting .wallpaper.daytime.night 21)
+    if   (( h >= night || h < dawn )); then echo night
+    elif (( h >= dusk ));               then echo dusk
+    elif (( h >= day ));                then echo day
+    else                                     echo dawn
+    fi
+}
+
+daytime_pool() { # files for a phase: <folder>/<phase>/*, else names containing the phase
+    local phase=${1:-$(daytime_phase)} f
+    if [[ -d "$FOLDER/$phase" ]]; then
+        media_in "$FOLDER/$phase" "$IMAGE_RE"
+        return
+    fi
+    media_in "$FOLDER" "$IMAGE_RE" | while IFS= read -r f; do
+        [[ "${f##*/}" == *"$phase"* || "${f,,}" == *"/$phase/"* ]] && printf '%s\n' "$f"
+    done
+}
+
+pool() { # the files the current mode rotates through
+    case "$MODE" in
+        theme)
+            local t; t=$(theme_backgrounds)
+            if [[ -n "$t" ]]; then printf '%s\n' "$t"; else media_in "$FOLDER" "$IMAGE_RE"; fi ;;
+        daytime)
+            # A phase with no pictures falls back to the whole folder.
+            local d; d=$(daytime_pool)
+            if [[ -n "$d" ]]; then printf '%s\n' "$d"; else media_in "$FOLDER" "$IMAGE_RE"; fi ;;
+        live)    media_in "$FOLDER" "$VIDEO_RE" ;;
+        *)       media_in "$FOLDER" "$IMAGE_RE" ;;
+    esac
+}
+
+# --------------------------------------------------------------- appliers ---
+stop_live() { pkill -x mpvpaper >/dev/null 2>&1 || true; }
+
+ensure_awww() {
+    command -v awww >/dev/null 2>&1 || die "awww is not installed"
+    if ! pgrep -x awww-daemon >/dev/null 2>&1; then
+        awww-daemon >/dev/null 2>&1 &
+        sleep 0.6
+    fi
+}
+
+pick_transition() {
+    if [[ "$TRANSITION" == "random" ]]; then
+        local kinds=(fade wipe wave grow outer center left right top bottom)
+        printf "%s" "${kinds[RANDOM % ${#kinds[@]}]}"
+    else
+        printf '%s' "$TRANSITION"
+    fi
+}
+
+# Each output gets its own awww call. One call per output keeps centred
+# transitions (grow / outer / center) centred on every monitor instead of
+# on a single global point.
+show_image() { # show_image <file> [output]
+    local img=$1 only=${2:-} tr out pids=()
+    ensure_awww
+    tr=$(pick_transition)
+    local -a common=(--transition-type "$tr" --transition-duration "$DURATION" --transition-fps "$FPS")
+    [[ "$tr" == "wave" || "$tr" == "wipe" ]] && common+=(--transition-angle $((RANDOM % 360)))
+    [[ "$tr" == "grow" || "$tr" == "outer" ]] && common+=(--transition-pos center)
+    if [[ -n "$only" ]]; then
+        awww img "$img" -o "$only" "${common[@]}" >/dev/null 2>&1 || awww img "$img" -o "$only" >/dev/null 2>&1
+        return
+    fi
+    mapfile -t outs < <(outputs)
+    if [[ ${#outs[@]} -eq 0 ]]; then
+        awww img "$img" "${common[@]}" >/dev/null 2>&1 || awww img "$img" >/dev/null 2>&1
+        return
+    fi
+    for out in "${outs[@]}"; do
+        awww img "$img" -o "$out" "${common[@]}" >/dev/null 2>&1 &
+        pids+=($!)
+    done
+    local ok=1 p
+    for p in "${pids[@]}"; do wait "$p" || ok=0; done
+    [[ $ok -eq 1 ]] || awww img "$img" >/dev/null 2>&1 || warn "awww could not set $img"
+}
+
+video_frame() { # first good frame of a video -> cached jpg (thumbnail + palette source)
+    local v=$1 key out
+    key=$(printf '%s' "$v" | md5sum | cut -c1-16)
+    out="$CACHE/thumbs/$key.jpg"
+    if [[ ! -s "$out" ]] && command -v ffmpeg >/dev/null 2>&1; then
+        ffmpeg -nostdin -loglevel error -y -ss 1 -i "$v" -frames:v 1 -vf "scale=1280:-2" "$out" >/dev/null 2>&1 \
+            || ffmpeg -nostdin -loglevel error -y -i "$v" -frames:v 1 -vf "scale=1280:-2" "$out" >/dev/null 2>&1 || true
+    fi
+    [[ -s "$out" ]] && printf '%s' "$out"
+}
+
+show_video() { # show_video <file>
+    local v=$1 out
+    command -v mpvpaper >/dev/null 2>&1 || die "live wallpapers need mpvpaper (pacman -S mpvpaper)"
+    stop_live
+    local opts
+    opts=$(setting .wallpaper.liveOptions "no-audio loop panscan=1.0 hwdec=auto")
+    mapfile -t outs < <(outputs)
+    [[ ${#outs[@]} -gt 0 ]] || outs=("*")
+    for out in "${outs[@]}"; do
+        mpvpaper -f -o "$opts" "$out" "$v" >/dev/null 2>&1 || warn "mpvpaper failed on $out"
+    done
+    # A still of the video under it: shown during startup, used by hyprlock
+    # and by the palette generator.
+    local frame; frame=$(video_frame "$v" || true)
+    [[ -n "$frame" ]] && show_image "$frame"
+}
+
+palette_follows() { # should a new wallpaper recolour the system?
+    [[ "$LOCKED" == "true" ]] && return 1
+    local tc; tc=$(cat "$THEME_CONF" 2>/dev/null || echo wallpaper)
+    [[ "$tc" == "wallpaper" ]]
+}
+
+recolour() { # recolour <image>
+    command -v aequalyn-theme >/dev/null 2>&1 || return 0
+    aequalyn-theme --colors-only "$1" >/dev/null 2>&1 || warn "palette generation failed"
+}
+
+remember() { # remember <file>
+    printf '%s' "$1" > "$WALL_CONF"
+    printf '%s' "$1" > "$CACHE/current-wallpaper"
+    state_set '.current = $f | .lastChange = ($t | tonumber) | .mode = $m' \
+        --arg f "$1" --arg t "$(date +%s)" --arg m "$MODE"
+}
+
+apply() { # apply <file> [--no-palette] [--output NAME]
+    local f=$1; shift
+    local palette=1 only=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --no-palette) palette=0 ;;
+            --output) only=${2:-}; shift ;;
+        esac
+        shift
+    done
+    [[ -f "$f" ]] || die "no such file: $f"
+    f=$(readlink -f "$f")
+
+    local still=$f
+    if is_video "$f"; then
+        show_video "$f"
+        still=$(video_frame "$f" || echo "")
+    else
+        [[ -z "$only" ]] && stop_live
+        show_image "$f" "$only"
+    fi
+    [[ -n "$only" ]] || remember "$f"
+
+    if [[ $palette -eq 1 && -n "$still" ]] && palette_follows; then
+        recolour "$still"
+    fi
+}
+
+# --------------------------------------------------------------- stepping ---
+current() { cat "$WALL_CONF" 2>/dev/null || true; }
+
+step() { # step <+1|-1|random>
+    local dir=$1 cur idx=-1 i n next
+    mapfile -t files < <(pool)
+    n=${#files[@]}
+    [[ $n -gt 0 ]] || die "nothing to show: the $MODE pool is empty (folder: $FOLDER)"
+    cur=$(current)
+    for i in "${!files[@]}"; do [[ "${files[$i]}" == "$cur" ]] && { idx=$i; break; }; done
+
+    if [[ "$dir" == "random" || ( "$ORDER" == "shuffle" && "$dir" == "+1" && "$MODE" != "theme" ) ]]; then
+        if [[ $n -eq 1 ]]; then next=0
+        else
+            next=$((RANDOM % n))
+            [[ $next -eq $idx ]] && next=$(( (next + 1) % n ))
+        fi
+    elif [[ "$dir" == "-1" ]]; then
+        next=$(( (idx - 1 + n) % n ))
+    else
+        next=$(( (idx + 1) % n ))
+    fi
+
+    if [[ "$OUTPUTS_MODE" == "different" && "$MODE" != "live" ]]; then
+        # Primary output gets the chosen file, the others the files after it.
+        mapfile -t outs < <(outputs)
+        local k=0 out
+        for out in "${outs[@]}"; do
+            [[ $k -eq 0 ]] && { k=1; continue; }
+            show_image "${files[$(( (next + k) % n ))]}" "$out"
+            k=$((k + 1))
+        done
+        stop_live
+        apply "${files[$next]}" --output "${outs[0]:-}" --no-palette
+        remember "${files[$next]}"
+        palette_follows && recolour "${files[$next]}"
+        return
+    fi
+    apply "${files[$next]}"
+}
+
+# -------------------------------------------------------------- generator ---
+# Paints a wallpaper from the palette. Colours default to the live palette.
+generate() {
+    local style=${1:-gradient}; shift || true
+    command -v magick >/dev/null 2>&1 || die "generated wallpapers need ImageMagick (magick)"
+    local pal="$CONF/quickshell/theme-switcher/wallpaper-theme.json"
+    local c1 c2 c3 c4
+    c1=${1:-$(jq -r '.bgBase // "#11111b"' "$pal" 2>/dev/null)}
+    c2=${2:-$(jq -r '.accentPrimary // "#89b4fa"' "$pal" 2>/dev/null)}
+    c3=${3:-$(jq -r '.accentCyan // "#94e2d5"' "$pal" 2>/dev/null)}
+    c4=${4:-$(jq -r '.accentRed // "#f38ba8"' "$pal" 2>/dev/null)}
+    local w=3840 h=2160 size
+    size=$(hyprctl monitors -j 2>/dev/null | jq -r 'max_by(.width * .height) | "\(.width)x\(.height)"' 2>/dev/null || true)
+    [[ "$size" =~ ^[0-9]+x[0-9]+$ ]] && { w=${size%x*}; h=${size#*x}; }
+    local key out
+    key=$(printf '%s' "$style$c1$c2$c3$c4$w$h" | md5sum | cut -c1-10)
+    out="$DATA/generated/$style-$key.png"
+    case "$style" in
+        solid)
+            magick -size "${w}x${h}" "xc:$c1" "$out" ;;
+        gradient)
+            magick -size "${w}x${h}" -define gradient:angle=135 "gradient:$c2-$c1" "$out" ;;
+        aurora)
+            magick -size "${w}x${h}" "xc:$c1" \
+                \( -size "${w}x${h}" xc:none -fill "$c2" -draw "ellipse $((w/4)),$((h/3)) $((w/3)),$((h/5)) 0,360" \) -composite \
+                \( -size "${w}x${h}" xc:none -fill "$c3" -draw "ellipse $((w*3/4)),$((h*2/3)) $((w/4)),$((h/6)) 0,360" \) -composite \
+                -blur 0x$((h/12)) "$out" ;;
+        dusk)
+            magick -size "${w}x${h}" -define gradient:angle=180 "gradient:$c4-$c1" \
+                \( -size "${w}x$((h/3))" "gradient:none-$c1" \) -gravity south -composite "$out" ;;
+        *) die "unknown style: $style (solid, gradient, aurora, dusk)" ;;
+    esac
+    [[ -s "$out" ]] || die "ImageMagick did not produce $out"
+    # The colours came from the palette, so do not regenerate it from them.
+    apply "$out" --no-palette
+    printf '%s\n' "$out"
+}
+
+# -------------------------------------------------------------- listings ---
+list_cmd() {
+    local want_all=0 json=0
+    for a in "$@"; do
+        case "$a" in --all) want_all=1 ;; --json) json=1 ;; esac
+    done
+    local files
+    if [[ $want_all -eq 1 ]]; then
+        files=$( { media_in "$FOLDER"; media_in "$HOME/Pictures/Wallpapers"; theme_backgrounds; media_in "$DATA/generated" "$IMAGE_RE"; } | awk '!seen[$0]++')
+    else
+        files=$(pool)
+    fi
+    if [[ $json -eq 0 ]]; then printf '%s\n' "$files"; return; fi
+    # One jq for the whole list; ffmpeg only runs for videos without a cached frame.
+    local f thumb
+    while IFS= read -r f; do
+        [[ -n "$f" ]] || continue
+        thumb=""
+        is_video "$f" && thumb=$(video_frame "$f" || true)
+        printf '%s\t%s\n' "$f" "$thumb"
+    done <<< "$files" | jq -R -s -c --arg home "$HOME" '
+        split("\n") | map(select(length > 0) | split("\t")) | map(
+            .[0] as $p | (.[1] // "") as $t | ($p | split("/")) as $parts
+            | { path: $p,
+                name: ($parts[-1] | sub("\\.[^.]+$"; "")),
+                folder: ($parts[0:-1] | join("/") | if startswith($home) then "~" + .[($home | length):] else . end),
+                video: ($p | test("\\.(mp4|webm|mkv|mov)$"; "i")),
+                generated: ($p | test("/aequalyn/generated/")),
+                theme: ($p | test("/themes/[^/]+/backgrounds/")),
+                thumb: (if $t == "" then $p else $t end) })'
+}
+
+status_cmd() {
+    local next=0 last
+    last=$(state_get .lastChange); last=${last:-0}
+    [[ "$MODE" == "slideshow" ]] && next=$(( last + INTERVAL * 60 ))
+    jq -n -c --arg mode "$MODE" --arg cur "$(current)" --arg folder "$FOLDER" \
+        --argjson interval "${INTERVAL:-30}" --argjson last "$last" --argjson next "$next" \
+        --arg phase "$(daytime_phase)" --arg theme "$(basename "$(readlink -f "$CURRENT_THEME" 2>/dev/null)" 2>/dev/null)" \
+        '{mode: $mode, current: $cur, folder: $folder, interval: $interval,
+          lastChange: $last, nextChange: $next, phase: $phase, theme: $theme}'
+}
+
+# ------------------------------------------------------------------- tick ---
+palette_tick() { # light/dark by the clock when .palette.mode == "auto"
+    [[ "$(setting .palette.mode dark)" == "auto" ]] || return 0
+    palette_follows || return 0
+    local h light dark want have
+    h=$((10#$(date +%H)))
+    light=$(setting .palette.lightFrom 7); dark=$(setting .palette.darkFrom 19)
+    if (( h >= light && h < dark )); then want=light; else want=dark; fi
+    have=$(state_get .paletteMode)
+    [[ "$want" == "$have" ]] && return 0
+    state_set '.paletteMode = $m' --arg m "$want"
+    command -v aequalyn-theme >/dev/null 2>&1 && aequalyn-theme --refresh >/dev/null 2>&1 || true
+}
+
+tick() {
+    case "$MODE" in
+        slideshow)
+            local last now
+            last=$(state_get .lastChange); last=${last:-0}; now=$(date +%s)
+            (( now - last >= INTERVAL * 60 )) && step +1 ;;
+        daytime)
+            local phase have
+            phase=$(daytime_phase); have=$(state_get .phase)
+            if [[ "$phase" != "$have" ]]; then
+                state_set '.phase = $p' --arg p "$phase"
+                step random
+            fi ;;
+    esac
+    palette_tick
+}
+
+workspace_cmd() {
+    local ws=${1:-}
+    [[ -n "$ws" && "$MODE" == "workspace" ]] || return 0
+    local f
+    f=$(setting ".wallpaper.workspaces[\"$ws\"]" "")
+    f=$(expand "$f")
+    if [[ -z "$f" || ! -f "$f" ]]; then
+        # No assignment: give every workspace a stable pick from the folder.
+        mapfile -t files < <(media_in "$FOLDER" "$IMAGE_RE")
+        [[ ${#files[@]} -gt 0 ]] || return 0
+        local n=${#files[@]} idx
+        if [[ "$ws" =~ ^[0-9]+$ ]]; then idx=$(( (ws - 1) % n )); else idx=$(( $(printf '%s' "$ws" | cksum | cut -d' ' -f1) % n )); fi
+        f=${files[$idx]}
+    fi
+    [[ "$(current)" == "$f" ]] && return 0
+    if [[ "$WS_PALETTE" == "true" ]]; then apply "$f"; else apply "$f" --no-palette; fi
+}
+
+restore() {
+    local f; f=$(current)
+    [[ -z "$f" || ! -f "$f" ]] && f=$(cat "$CACHE/current-wallpaper" 2>/dev/null || true)
+    if [[ -z "$f" || ! -f "$f" ]]; then
+        f=$(pool | head -n1)
+    fi
+    [[ -n "$f" && -f "$f" ]] || { warn "no wallpaper to restore"; return 1; }
+    # Palette files survive reboots; regenerate only in wallpaper mode.
+    apply "$f"
+}
+
+# -------------------------------------------------------------------- main ---
+cmd=${1:-}
+case "$cmd" in
+    set)        shift; [[ $# -ge 1 ]] || die "usage: set <file>"; apply "$@" ;;
+    next)       step +1 ;;
+    prev)       step -1 ;;
+    random)     step random ;;
+    mode)
+        if [[ -z "${2:-}" ]]; then printf '%s\n' "$MODE"; exit 0; fi
+        case "$2" in static|theme|slideshow|daytime|workspace|live) ;; *) die "unknown mode: $2" ;; esac
+        aequalyn-settings set-str .wallpaper.mode "$2" >/dev/null
+        MODE=$2
+        state_set 'del(.phase)'
+        cur=$(current)
+        case "$2" in
+            live)    is_video "$cur" || step +1 ;;
+            theme)
+                first=$(theme_backgrounds | head -n1)
+                if [[ -n "$first" && "$cur" != "$(dirname "$first")/"* ]]; then apply "$first"; fi ;;
+            daytime) tick ;;
+            *)       if is_video "$cur"; then stop_live; step +1; fi ;;
+        esac ;;
+    tick)       tick ;;
+    workspace)  workspace_cmd "${2:-}" ;;
+    assign)
+        [[ $# -ge 3 && -f "$3" ]] || die "usage: assign <workspace> <file>"
+        aequalyn-settings set ".wallpaper.workspaces[\"$2\"]" "$(jq -n --arg f "$(readlink -f "$3")" '$f')" >/dev/null
+        apply "$3" ;;
+    generate)   shift; generate "$@" ;;
+    list)       shift; list_cmd "$@" ;;
+    thumb)      video_frame "${2:?usage: thumb <video>}" ;;
+    status)     status_cmd ;;
+    restore)    restore ;;
+    -h|--help)  sed -n '2,27p' "$0" ;;
+    "")         die "usage: aequalyn-wallpaper <file> | set | next | prev | random | mode | tick | ... (see --help)" ;;
+    *)
+        # Backwards compatible: aequalyn-wallpaper <file>
+        [[ -f "$cmd" ]] || die "unknown command or missing file: $cmd"
+        apply "$@" ;;
+esac
