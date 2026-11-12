@@ -1,0 +1,1445 @@
+[
+ {
+  "id": "lua:aq-portrait",
+  "key": "portrait",
+  "name": "Portrait",
+  "group": "Focus",
+  "hint": "The main window in the middle, the others small at the sides",
+  "art": [
+   [
+    0.22,
+    0.0,
+    0.56,
+    1.0
+   ],
+   [
+    0.0,
+    0.2556,
+    0.22,
+    0.2444
+   ],
+   [
+    0.78,
+    0.2556,
+    0.22,
+    0.2444
+   ],
+   [
+    0.0,
+    0.5,
+    0.22,
+    0.2444
+   ],
+   [
+    0.78,
+    0.5,
+    0.22,
+    0.2444
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-landscape",
+  "key": "landscape",
+  "name": "Landscape",
+  "group": "Focus",
+  "hint": "A wide main window, the others small above and below",
+  "art": [
+   [
+    0.0,
+    0.19,
+    1.0,
+    0.62
+   ],
+   [
+    0.3287,
+    0.0,
+    0.1706,
+    0.19
+   ],
+   [
+    0.3287,
+    0.81,
+    0.1706,
+    0.19
+   ],
+   [
+    0.5,
+    0.0,
+    0.1706,
+    0.19
+   ],
+   [
+    0.5,
+    0.81,
+    0.1706,
+    0.19
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-centerpiece",
+  "key": "centerpiece",
+  "name": "Centerpiece",
+  "group": "Focus",
+  "hint": "The main window in the middle, the others all round it",
+  "art": [
+   [
+    0.22,
+    0.19,
+    0.56,
+    0.62
+   ],
+   [
+    0.4144,
+    0.0,
+    0.1706,
+    0.19
+   ],
+   [
+    0.78,
+    0.3778,
+    0.22,
+    0.2444
+   ],
+   [
+    0.4144,
+    0.81,
+    0.1706,
+    0.19
+   ],
+   [
+    0.0,
+    0.3778,
+    0.22,
+    0.2444
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-stage",
+  "key": "stage",
+  "name": "Stage",
+  "group": "Focus",
+  "hint": "The others in a slim row on top, the main window below",
+  "art": [
+   [
+    0.0,
+    0.2,
+    1.0,
+    0.8
+   ],
+   [
+    0.14,
+    0.0,
+    0.18,
+    0.2
+   ],
+   [
+    0.32,
+    0.0,
+    0.18,
+    0.2
+   ],
+   [
+    0.5,
+    0.0,
+    0.18,
+    0.2
+   ],
+   [
+    0.68,
+    0.0,
+    0.18,
+    0.2
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-theatre",
+  "key": "theatre",
+  "name": "Theatre",
+  "group": "Focus",
+  "hint": "The main window on top, the others in a slim row below",
+  "art": [
+   [
+    0.0,
+    0.0,
+    1.0,
+    0.8
+   ],
+   [
+    0.14,
+    0.8,
+    0.18,
+    0.2
+   ],
+   [
+    0.32,
+    0.8,
+    0.18,
+    0.2
+   ],
+   [
+    0.5,
+    0.8,
+    0.18,
+    0.2
+   ],
+   [
+    0.68,
+    0.8,
+    0.18,
+    0.2
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-gallery_right",
+  "key": "gallery_right",
+  "name": "Gallery Right",
+  "group": "Focus",
+  "hint": "A large pane, the others in a grid on the right",
+  "art": [
+   [
+    0.0,
+    0.0,
+    0.62,
+    1.0
+   ],
+   [
+    0.6312,
+    0.1567,
+    0.1675,
+    0.1856
+   ],
+   [
+    0.8213,
+    0.1567,
+    0.1675,
+    0.1856
+   ],
+   [
+    0.6312,
+    0.6567,
+    0.1675,
+    0.1856
+   ],
+   [
+    0.8213,
+    0.6567,
+    0.1675,
+    0.1856
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-gallery_bottom",
+  "key": "gallery_bottom",
+  "name": "Gallery Bottom",
+  "group": "Focus",
+  "hint": "A large pane, the others in a grid below",
+  "art": [
+   [
+    0.0,
+    0.0,
+    1.0,
+    0.62
+   ],
+   [
+    0.0063,
+    0.6778,
+    0.2375,
+    0.2633
+   ],
+   [
+    0.2562,
+    0.6778,
+    0.2375,
+    0.2633
+   ],
+   [
+    0.5062,
+    0.6778,
+    0.2375,
+    0.2633
+   ],
+   [
+    0.7562,
+    0.6778,
+    0.2375,
+    0.2633
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-gallery_left",
+  "key": "gallery_left",
+  "name": "Gallery Left",
+  "group": "Focus",
+  "hint": "A large pane, the others in a grid on the left",
+  "art": [
+   [
+    0.38,
+    0.0,
+    0.62,
+    1.0
+   ],
+   [
+    0.0112,
+    0.1567,
+    0.1675,
+    0.1856
+   ],
+   [
+    0.2013,
+    0.1567,
+    0.1675,
+    0.1856
+   ],
+   [
+    0.0112,
+    0.6567,
+    0.1675,
+    0.1856
+   ],
+   [
+    0.2013,
+    0.6567,
+    0.1675,
+    0.1856
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-gallery_top",
+  "key": "gallery_top",
+  "name": "Gallery Top",
+  "group": "Focus",
+  "hint": "A large pane, the others in a grid above",
+  "art": [
+   [
+    0.0,
+    0.38,
+    1.0,
+    0.62
+   ],
+   [
+    0.0063,
+    0.0578,
+    0.2375,
+    0.2633
+   ],
+   [
+    0.2562,
+    0.0578,
+    0.2375,
+    0.2633
+   ],
+   [
+    0.5062,
+    0.0578,
+    0.2375,
+    0.2633
+   ],
+   [
+    0.7562,
+    0.0578,
+    0.2375,
+    0.2633
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-diptych_left",
+  "key": "diptych_left",
+  "name": "Diptych Left",
+  "group": "Panes",
+  "hint": "A large pane on the left, the rest stacked on the right",
+  "art": [
+   [
+    0.0,
+    0.0,
+    0.62,
+    1.0
+   ],
+   [
+    0.62,
+    0.0,
+    0.38,
+    0.25
+   ],
+   [
+    0.62,
+    0.25,
+    0.38,
+    0.25
+   ],
+   [
+    0.62,
+    0.5,
+    0.38,
+    0.25
+   ],
+   [
+    0.62,
+    0.75,
+    0.38,
+    0.25
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-diptych_right",
+  "key": "diptych_right",
+  "name": "Diptych Right",
+  "group": "Panes",
+  "hint": "A large pane on the right, the rest stacked on the left",
+  "art": [
+   [
+    0.38,
+    0.0,
+    0.62,
+    1.0
+   ],
+   [
+    0.0,
+    0.0,
+    0.38,
+    0.25
+   ],
+   [
+    0.0,
+    0.25,
+    0.38,
+    0.25
+   ],
+   [
+    0.0,
+    0.5,
+    0.38,
+    0.25
+   ],
+   [
+    0.0,
+    0.75,
+    0.38,
+    0.25
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-diptych_top",
+  "key": "diptych_top",
+  "name": "Diptych Top",
+  "group": "Panes",
+  "hint": "A large pane on top, the rest side by side below",
+  "art": [
+   [
+    0.0,
+    0.0,
+    1.0,
+    0.62
+   ],
+   [
+    0.0,
+    0.62,
+    0.25,
+    0.38
+   ],
+   [
+    0.25,
+    0.62,
+    0.25,
+    0.38
+   ],
+   [
+    0.5,
+    0.62,
+    0.25,
+    0.38
+   ],
+   [
+    0.75,
+    0.62,
+    0.25,
+    0.38
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-diptych_bottom",
+  "key": "diptych_bottom",
+  "name": "Diptych Bottom",
+  "group": "Panes",
+  "hint": "A large pane below, the rest side by side above",
+  "art": [
+   [
+    0.0,
+    0.38,
+    1.0,
+    0.62
+   ],
+   [
+    0.0,
+    0.0,
+    0.25,
+    0.38
+   ],
+   [
+    0.25,
+    0.0,
+    0.25,
+    0.38
+   ],
+   [
+    0.5,
+    0.0,
+    0.25,
+    0.38
+   ],
+   [
+    0.75,
+    0.0,
+    0.25,
+    0.38
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-triptych",
+  "key": "triptych",
+  "name": "Triptych",
+  "group": "Panes",
+  "hint": "The main window in the middle, the rest stacked either side",
+  "art": [
+   [
+    0.22,
+    0.0,
+    0.56,
+    1.0
+   ],
+   [
+    0.0,
+    0.0,
+    0.22,
+    0.5
+   ],
+   [
+    0.78,
+    0.0,
+    0.22,
+    0.5
+   ],
+   [
+    0.0,
+    0.5,
+    0.22,
+    0.5
+   ],
+   [
+    0.78,
+    0.5,
+    0.22,
+    0.5
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-bento",
+  "key": "bento",
+  "name": "Bento",
+  "group": "Panes",
+  "hint": "A large pane, one window beside it, the rest in a row under that one",
+  "art": [
+   [
+    0.0,
+    0.0,
+    0.62,
+    1.0
+   ],
+   [
+    0.62,
+    0.0,
+    0.38,
+    0.55
+   ],
+   [
+    0.62,
+    0.55,
+    0.1263,
+    0.45
+   ],
+   [
+    0.7462,
+    0.55,
+    0.1269,
+    0.45
+   ],
+   [
+    0.8731,
+    0.55,
+    0.1269,
+    0.45
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-hero",
+  "key": "hero",
+  "name": "Hero",
+  "group": "Panes",
+  "hint": "A wide pane on top, one half below, the rest sharing the other half",
+  "art": [
+   [
+    0.0,
+    0.0,
+    1.0,
+    0.62
+   ],
+   [
+    0.0,
+    0.62,
+    0.5,
+    0.38
+   ],
+   [
+    0.5,
+    0.62,
+    0.1663,
+    0.38
+   ],
+   [
+    0.6663,
+    0.62,
+    0.1669,
+    0.38
+   ],
+   [
+    0.8331,
+    0.62,
+    0.1669,
+    0.38
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-corner",
+  "key": "corner",
+  "name": "Corner",
+  "group": "Panes",
+  "hint": "The main window in a corner, the rest in an L around it",
+  "art": [
+   [
+    0.0,
+    0.0,
+    0.62,
+    0.62
+   ],
+   [
+    0.62,
+    0.0,
+    0.38,
+    0.5
+   ],
+   [
+    0.62,
+    0.5,
+    0.38,
+    0.5
+   ],
+   [
+    0.0,
+    0.62,
+    0.31,
+    0.38
+   ],
+   [
+    0.31,
+    0.62,
+    0.31,
+    0.38
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-panels",
+  "key": "panels",
+  "name": "Panels",
+  "group": "Panes",
+  "hint": "Half the screen for the main window, tall panels for the rest",
+  "art": [
+   [
+    0.0,
+    0.0,
+    0.62,
+    1.0
+   ],
+   [
+    0.62,
+    0.0,
+    0.095,
+    1.0
+   ],
+   [
+    0.715,
+    0.0,
+    0.095,
+    1.0
+   ],
+   [
+    0.81,
+    0.0,
+    0.095,
+    1.0
+   ],
+   [
+    0.905,
+    0.0,
+    0.095,
+    1.0
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-ultrawide",
+  "key": "ultrawide",
+  "name": "Ultrawide",
+  "group": "Panes",
+  "hint": "Three columns: the main window in the middle, the rest at the sides",
+  "art": [
+   [
+    0.3331,
+    0.0,
+    0.3331,
+    1.0
+   ],
+   [
+    0.0,
+    0.0,
+    0.3331,
+    0.5
+   ],
+   [
+    0.0,
+    0.5,
+    0.3331,
+    0.5
+   ],
+   [
+    0.6663,
+    0.0,
+    0.3337,
+    0.5
+   ],
+   [
+    0.6663,
+    0.5,
+    0.3337,
+    0.5
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-mosaic",
+  "key": "mosaic",
+  "name": "Mosaic",
+  "group": "Grids",
+  "hint": "Equal tiles in the grid that suits the screen best",
+  "art": [
+   [
+    0.0,
+    0.0,
+    0.3331,
+    0.5
+   ],
+   [
+    0.3331,
+    0.0,
+    0.3331,
+    0.5
+   ],
+   [
+    0.6663,
+    0.0,
+    0.3337,
+    0.5
+   ],
+   [
+    0.0,
+    0.5,
+    0.5,
+    0.5
+   ],
+   [
+    0.5,
+    0.5,
+    0.5,
+    0.5
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-spread",
+  "key": "spread",
+  "name": "Spread",
+  "group": "Grids",
+  "hint": "A grid with room between the tiles",
+  "art": [
+   [
+    0.0375,
+    0.0667,
+    0.45,
+    0.2589
+   ],
+   [
+    0.5125,
+    0.0667,
+    0.45,
+    0.2589
+   ],
+   [
+    0.0375,
+    0.37,
+    0.45,
+    0.2589
+   ],
+   [
+    0.5125,
+    0.37,
+    0.45,
+    0.2589
+   ],
+   [
+    0.0375,
+    0.6733,
+    0.925,
+    0.26
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-ledger",
+  "key": "ledger",
+  "name": "Ledger",
+  "group": "Grids",
+  "hint": "Two columns, filled row by row",
+  "art": [
+   [
+    0.0,
+    0.0,
+    0.5,
+    0.3333
+   ],
+   [
+    0.5,
+    0.0,
+    0.5,
+    0.3333
+   ],
+   [
+    0.0,
+    0.3333,
+    0.5,
+    0.3333
+   ],
+   [
+    0.5,
+    0.3333,
+    0.5,
+    0.3333
+   ],
+   [
+    0.0,
+    0.6667,
+    1.0,
+    0.3333
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-shelves",
+  "key": "shelves",
+  "name": "Shelves",
+  "group": "Grids",
+  "hint": "Rows of three",
+  "art": [
+   [
+    0.0,
+    0.0,
+    0.3331,
+    0.5
+   ],
+   [
+    0.3331,
+    0.0,
+    0.3331,
+    0.5
+   ],
+   [
+    0.6663,
+    0.0,
+    0.3337,
+    0.5
+   ],
+   [
+    0.0,
+    0.5,
+    0.5,
+    0.5
+   ],
+   [
+    0.5,
+    0.5,
+    0.5,
+    0.5
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-masonry",
+  "key": "masonry",
+  "name": "Masonry",
+  "group": "Grids",
+  "hint": "Columns of different heights, like a brick wall",
+  "art": [
+   [
+    0.0,
+    0.0,
+    0.3331,
+    0.5
+   ],
+   [
+    0.3331,
+    0.0,
+    0.3331,
+    0.5
+   ],
+   [
+    0.6663,
+    0.0,
+    0.3337,
+    1.0
+   ],
+   [
+    0.0,
+    0.5,
+    0.3331,
+    0.5
+   ],
+   [
+    0.3331,
+    0.5,
+    0.3331,
+    0.5
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-quadrant",
+  "key": "quadrant",
+  "name": "Quadrant",
+  "group": "Grids",
+  "hint": "Four quarters; extra windows share the last one",
+  "art": [
+   [
+    0.0,
+    0.0,
+    0.5,
+    0.5
+   ],
+   [
+    0.5,
+    0.0,
+    0.5,
+    0.5
+   ],
+   [
+    0.0,
+    0.5,
+    0.5,
+    0.5
+   ],
+   [
+    0.5,
+    0.5,
+    0.5,
+    0.25
+   ],
+   [
+    0.5,
+    0.75,
+    0.5,
+    0.25
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-twin_columns",
+  "key": "twin_columns",
+  "name": "Twin Columns",
+  "group": "Grids",
+  "hint": "Two columns, windows taking turns left and right",
+  "art": [
+   [
+    0.0,
+    0.0,
+    0.5,
+    0.3333
+   ],
+   [
+    0.5,
+    0.0,
+    0.5,
+    0.5
+   ],
+   [
+    0.0,
+    0.3333,
+    0.5,
+    0.3333
+   ],
+   [
+    0.5,
+    0.5,
+    0.5,
+    0.5
+   ],
+   [
+    0.0,
+    0.6667,
+    0.5,
+    0.3333
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-strip",
+  "key": "strip",
+  "name": "Strip",
+  "group": "Flow",
+  "hint": "Side by side in one row",
+  "art": [
+   [
+    0.0,
+    0.0,
+    0.2,
+    1.0
+   ],
+   [
+    0.2,
+    0.0,
+    0.2,
+    1.0
+   ],
+   [
+    0.4,
+    0.0,
+    0.2,
+    1.0
+   ],
+   [
+    0.6,
+    0.0,
+    0.2,
+    1.0
+   ],
+   [
+    0.8,
+    0.0,
+    0.2,
+    1.0
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-column",
+  "key": "column",
+  "name": "Column",
+  "group": "Flow",
+  "hint": "One above the other",
+  "art": [
+   [
+    0.0,
+    0.0,
+    1.0,
+    0.2
+   ],
+   [
+    0.0,
+    0.2,
+    1.0,
+    0.2
+   ],
+   [
+    0.0,
+    0.4,
+    1.0,
+    0.2
+   ],
+   [
+    0.0,
+    0.6,
+    1.0,
+    0.2
+   ],
+   [
+    0.0,
+    0.8,
+    1.0,
+    0.2
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-spiral",
+  "key": "spiral",
+  "name": "Spiral",
+  "group": "Flow",
+  "hint": "Each window halves what's left, turning as it goes",
+  "art": [
+   [
+    0.0,
+    0.0,
+    0.5,
+    1.0
+   ],
+   [
+    0.5,
+    0.0,
+    0.5,
+    0.5
+   ],
+   [
+    0.75,
+    0.5,
+    0.25,
+    0.5
+   ],
+   [
+    0.5,
+    0.75,
+    0.25,
+    0.25
+   ],
+   [
+    0.5,
+    0.5,
+    0.25,
+    0.25
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-fibonacci",
+  "key": "fibonacci",
+  "name": "Fibonacci",
+  "group": "Flow",
+  "hint": "Each window halves what's left, always toward the corner",
+  "art": [
+   [
+    0.0,
+    0.0,
+    0.5,
+    1.0
+   ],
+   [
+    0.5,
+    0.0,
+    0.5,
+    0.5
+   ],
+   [
+    0.5,
+    0.5,
+    0.25,
+    0.5
+   ],
+   [
+    0.75,
+    0.5,
+    0.25,
+    0.25
+   ],
+   [
+    0.75,
+    0.75,
+    0.25,
+    0.25
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-golden",
+  "key": "golden",
+  "name": "Golden",
+  "group": "Flow",
+  "hint": "A spiral cut at the golden ratio",
+  "art": [
+   [
+    0.0,
+    0.0,
+    0.6175,
+    1.0
+   ],
+   [
+    0.6175,
+    0.0,
+    0.3825,
+    0.6178
+   ],
+   [
+    0.7638,
+    0.6178,
+    0.2362,
+    0.3822
+   ],
+   [
+    0.6175,
+    0.6178,
+    0.1462,
+    0.1911
+   ],
+   [
+    0.6175,
+    0.8089,
+    0.1462,
+    0.1911
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-pinwheel",
+  "key": "pinwheel",
+  "name": "Pinwheel",
+  "group": "Flow",
+  "hint": "The main window in the middle, four arms turning round it",
+  "art": [
+   [
+    0.25,
+    0.25,
+    0.5,
+    0.5
+   ],
+   [
+    0.0,
+    0.0,
+    0.75,
+    0.25
+   ],
+   [
+    0.75,
+    0.0,
+    0.25,
+    0.75
+   ],
+   [
+    0.25,
+    0.75,
+    0.75,
+    0.25
+   ],
+   [
+    0.0,
+    0.25,
+    0.25,
+    0.75
+   ]
+  ]
+ },
+ {
+  "id": "lua:aq-cascade",
+  "key": "cascade",
+  "name": "Cascade",
+  "group": "Flow",
+  "hint": "Overlapping like a stair, the main window in front",
+  "art": [
+   [
+    0.32,
+    0.32,
+    0.68,
+    0.68
+   ],
+   [
+    0.24,
+    0.24,
+    0.68,
+    0.68
+   ],
+   [
+    0.16,
+    0.16,
+    0.68,
+    0.68
+   ],
+   [
+    0.08,
+    0.08,
+    0.68,
+    0.68
+   ],
+   [
+    0.0,
+    0.0,
+    0.68,
+    0.68
+   ]
+  ]
+ },
+ {
+  "id": "dwindle",
+  "key": "dwindle",
+  "name": "Dwindle",
+  "group": "Hyprland",
+  "hint": "Every window splits the space it lands in",
+  "art": [
+   [
+    0,
+    0,
+    0.5,
+    1
+   ],
+   [
+    0.5,
+    0,
+    0.5,
+    0.5
+   ],
+   [
+    0.5,
+    0.5,
+    0.25,
+    0.5
+   ],
+   [
+    0.75,
+    0.5,
+    0.25,
+    0.25
+   ],
+   [
+    0.75,
+    0.75,
+    0.25,
+    0.25
+   ]
+  ]
+ },
+ {
+  "id": "master",
+  "key": "master",
+  "name": "Master",
+  "group": "Hyprland",
+  "hint": "A master area and a stack",
+  "art": [
+   [
+    0,
+    0,
+    0.55,
+    1
+   ],
+   [
+    0.55,
+    0,
+    0.45,
+    0.25
+   ],
+   [
+    0.55,
+    0.25,
+    0.45,
+    0.25
+   ],
+   [
+    0.55,
+    0.5,
+    0.45,
+    0.25
+   ],
+   [
+    0.55,
+    0.75,
+    0.45,
+    0.25
+   ]
+  ]
+ },
+ {
+  "id": "scrolling",
+  "key": "scrolling",
+  "name": "Scrolling",
+  "group": "Hyprland",
+  "hint": "Columns on a strip that scrolls",
+  "art": [
+   [
+    0.18,
+    0,
+    0.42,
+    1
+   ],
+   [
+    0.6,
+    0,
+    0.42,
+    1
+   ],
+   [
+    -0.26,
+    0,
+    0.42,
+    1
+   ],
+   [
+    1.02,
+    0,
+    0.42,
+    1
+   ],
+   [
+    -0.7,
+    0,
+    0.42,
+    1
+   ]
+  ]
+ },
+ {
+  "id": "monocle",
+  "key": "monocle",
+  "name": "Monocle",
+  "group": "Hyprland",
+  "hint": "One window at a time, full size",
+  "art": [
+   [
+    0,
+    0,
+    1,
+    1
+   ],
+   [
+    0.03,
+    0.04,
+    0.94,
+    0.92
+   ],
+   [
+    0.06,
+    0.08,
+    0.88,
+    0.84
+   ],
+   [
+    0.09,
+    0.12,
+    0.82,
+    0.76
+   ],
+   [
+    0.12,
+    0.16,
+    0.76,
+    0.68
+   ]
+  ]
+ }
+]
