@@ -68,7 +68,7 @@ shell for [Hyprland](https://hyprland.org/), with wallpaper-driven
   survives shell restarts.
 - **Colours** — one wallpaper change repaints the shell, Hyprland borders,
   kitty, foot, fuzzel, GTK 3/4, qt6ct, btop and hyprlock.
-- **Defaults** — Hyprland, kitty, fuzzel, chromium, thunar, grim/slurp/swappy,
+- **Defaults** — Hyprland, kitty, fuzzel, chromium, nautilus, grim/slurp/swappy,
   hyprlock/hypridle (lock 5 min, display off 6 min, suspend 15 min — all
   configurable), awww wallpapers, zram, snapper snapshots.
 - **Installer** — hybrid offline/online, dual-boot, LUKS2, Btrfs subvolumes,
@@ -205,4 +205,8 @@ or an agent gets the same result as the picker.
 ## Credits
 
 [nightdevil00](https://github.com/nightdevil00) contributed to the code here.
-The shell builds on a modular Quickshell config by doannc2212.
+
+## License
+
+This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
+See [LICENSE](LICENSE) for the full text.
