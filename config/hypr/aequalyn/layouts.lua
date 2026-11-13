@@ -4,9 +4,8 @@
 -- "aq-<id>" and keeps, per workspace, the order windows sit in: slot 1 is
 -- the main window, the others keep their place until you move them.
 --
---   SUPER + Z               the focused window becomes the main one
---   SUPER + CTRL + arrows   swap the focused window with the previous / next
---   SUPER + ALT + - / =     the main pane smaller / larger on this workspace
+-- The keys that work on these layouts (Super + Shift + arrows, Alt + Tab, Super + Z,
+-- the resize keys, the layout picker...) are in keys.lua, loaded at the end.
 --
 -- Which layout each workspace uses, and the pane / gap settings, come from
 -- workspace-layouts.lua, written by `aequalyn-layout`.
@@ -79,6 +78,18 @@ local function opts_for(ws)
   return o
 end
 
+-- is this workspace on one of these layouts?
+function M.is_aq(ws)
+  return ws ~= nil and not ws.special and tostring(ws.tiled_layout or ""):match("^lua:aq%-") ~= nil
+end
+
+-- the windows of a workspace in slot order (slot 1 is the main window), for keys.lua
+function M.order(ws_id)
+  local out = {}
+  for i, id in ipairs(slots[ws_id] or {}) do out[i] = id end
+  return out
+end
+
 local function active_ws()
   local w = hl.get_active_workspace()
   return w and w.id
@@ -97,10 +108,18 @@ local function message(msg)
       local to = msg == "swapnext" and (at % #list) + 1 or ((at - 2) % #list) + 1
       list[at], list[to] = list[to], list[at]
     end
-  elseif msg == "grow" or msg == "shrink" then
+  elseif msg:match("^swap ") then
+    -- "swap <stable id>": the focused window and that one trade places
+    -- stable ids are strings of digits ("18000003"), compared as they come
+    local to = index_of(list, msg:sub(6))
+    if at and to and at ~= to then list[at], list[to] = list[to], list[at] end
+  elseif msg == "grow" or msg == "shrink" or msg:match("^resize ") then
+    -- "resize <share>": the main pane by that share of the screen (+ larger, - smaller)
+    local d = msg == "grow" and 0.04 or msg == "shrink" and -0.04 or (tonumber(msg:sub(8)) or 0)
     local cur = M.pane_by_ws[ws] or M.opts.pane
-    local d = msg == "grow" and 0.04 or -0.04
     M.pane_by_ws[ws] = math.max(0.3, math.min(0.85, cur + d))
+  elseif msg == "refresh" then
+    -- nothing to change: the layout is laid out again
   elseif msg == "reset" then
     M.pane_by_ws[ws] = nil
   else
@@ -127,6 +146,12 @@ for _, entry in ipairs(G.catalogue) do
   if not ok and not tostring(err):find("already registered", 1, true) then
     print("[aequalyn] layout aq-" .. entry.id .. ": " .. tostring(err))
   end
+end
+
+-- the keys (dofile, so `hyprctl reload` re-reads it too)
+do
+  local ok, err = pcall(dofile, HOME .. "/.config/hypr/aequalyn/keys.lua")
+  if not ok then print("[aequalyn] keys.lua: " .. tostring(err)) end
 end
 
 return M
