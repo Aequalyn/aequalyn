@@ -20,7 +20,8 @@ local M = { geometry = G }
 _G.aequalyn_layouts = M
 
 -- Defaults; workspace-layouts.lua replaces them through M.configure().
-M.opts = { pane = 0.62, middle = 0.56, gap = 24 }
+-- step: how much one press of Super + - / = changes the main pane (keys.lua)
+M.opts = { pane = 0.62, middle = 0.56, gap = 24, step = 0.01 }
 M.pane_by_ws = {}          -- workspace id -> pane share changed with the resize keys
 local slots = {}           -- workspace id -> ordered list of window stable ids
 
