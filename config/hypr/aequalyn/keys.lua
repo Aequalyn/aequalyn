@@ -1,4 +1,4 @@
--- Aequalyn's layout keys, as in Tableau (github.com/qempexe/omarchy-tableau).
+-- Aequalyn's layout keys, as in Tableau.
 --
 --   SUPER + L / SHIFT + L       the next / previous layout in your cycle (hyprland.lua)
 --   SUPER + CTRL + L, then 1-9  Dwindle, Scrolling, Master, Portrait, Landscape,
@@ -151,7 +151,7 @@ function K.tab(dir)
   end
 end
 
--- SUPER + - / =: `grow` 1 for minus, -1 for equal (as Tableau, after Omarchy's keys);
+-- SUPER + - / =: `grow` 1 for minus, -1 for equal (as Tableau);
 -- `scale` makes the step finer (ALT) or coarser (CTRL). On Aequalyn's layouts the main
 -- pane changes by step() of the screen and keeps going while held; elsewhere the focused
 -- window is resized by `px`.

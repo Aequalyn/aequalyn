@@ -25,7 +25,7 @@ The project is split across github.com/Aequalyn: `aequalyn` (core: bin/, config/
 - `packages/` — package lists and profiles: `base.packages`, `desktop.packages`, `aur.packages`, `profiles/*.packages`, `offline-extra.packages`, `aur-cache/` (prebuilt AUR packages for offline repo).
 - `installer/` — `aequalyn-install` (TUI wizard/applier), `aequalyn-detect` (L1 hardware/profile proposal), `apply.sh`, `install.toml.example` (install contract).
 - `aequalyn-iso` repo — archiso overlay and scripts: `bin/aequalyn-iso-make`, `bin/aequalyn-iso-test`, `overlay/`.
-- `themes/` — folder themes (`theme.json` or Omarchy `colors.toml`, `backgrounds/`, `preview.jpg`).
+- `themes/` — folder themes (`theme.json` or `colors.toml`, `backgrounds/`, `preview.jpg`).
 - `install.sh` — installs Aequalyn into a target home (or `--skel` for `/etc/skel`).
 - `docs/architecture.md` — architecture notes; `README.md` — overview/keybinds/usage.
 - `Aequalyn.md` (in parent workspace `` when present) — detailed change log.

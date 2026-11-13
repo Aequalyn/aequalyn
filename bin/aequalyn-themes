@@ -14,7 +14,7 @@
 #
 #   <id>/theme.json      {"name", "family", "author", "variant": "dark|light",
 #                         "palette": {bgBase, bgSurface, ... accentRed}}
-#   <id>/colors.toml     Omarchy-style colours (used when theme.json has no palette)
+#   <id>/colors.toml     colours from a colors.toml (used when theme.json has no palette)
 #   <id>/backgrounds/    images or videos, applied in name order
 #   <id>/preview.png     optional card image for the picker
 #
@@ -71,7 +71,7 @@ pretty() { # tokyo-night -> Tokyo Night
     printf '%s' "$1" | sed -E 's/[-_]+/ /g; s/\b(.)/\u\1/g'
 }
 
-# Omarchy colors.toml: key = "#rrggbb" lines -> {"key": "#rrggbb", ...}
+# colors.toml: key = "#rrggbb" lines -> {"key": "#rrggbb", ...}
 toml_colors() {
     sed -n -E 's/^[[:space:]]*([A-Za-z0-9_]+)[[:space:]]*=[[:space:]]*"(#[0-9A-Fa-f]{6})".*/\1\t\2/p' "$1" \
         | jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): .[1]}) | add // {}'
@@ -92,7 +92,7 @@ theme_json() { # theme_json <id> <dir>
           id: $id,
           dir: $dir,
           name: ($meta.name // $pretty),
-          family: ($meta.family // (if $colors != null then "Omarchy" else "Aequalyn" end)),
+          family: ($meta.family // (if $colors != null then "Folder" else "Aequalyn" end)),
           author: ($meta.author // ""),
           variant: ($meta.variant // ""),
           palette: ($meta.palette // null),
@@ -151,7 +151,7 @@ cmd_set() {
         if [[ "$cur" != "$dir/backgrounds/"* ]]; then
             local mode
             mode=$(aequalyn-settings get .wallpaper.mode static 2>/dev/null || echo static)
-            # Picking a theme with backgrounds behaves like Omarchy: its
+            # Picking a theme with backgrounds: its
             # backgrounds become the rotation, unless a timed mode is running.
             [[ "$mode" == "static" ]] && aequalyn-settings set-str .wallpaper.mode theme >/dev/null 2>&1 || true
             aequalyn-wallpaper set "$first"
@@ -178,13 +178,13 @@ cmd_install() {
     mkdir -p "$USER_DIR"
     if [[ -d "$src" ]]; then
         name=$(basename "$(cd "$src" && pwd)")
-        name=${name#omarchy-}; name=${name%-theme}
+        name=${name%-theme}
         dest="$USER_DIR/$name"
         [[ -e "$dest" ]] && die "already installed: $name"
         cp -r "$src" "$dest"
     else
         name=$(basename "$src" .git)
-        name=${name#omarchy-}; name=${name%-theme}
+        name=${name%-theme}
         dest="$USER_DIR/$name"
         [[ -e "$dest" ]] && die "already installed: $name"
         git clone -q --depth 1 "$src" "$dest" || die "clone failed: $src"

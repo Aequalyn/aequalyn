@@ -1,4 +1,4 @@
--- Aequalyn universal clipboard (Omarchy-style).
+-- Aequalyn universal clipboard.
 --
 -- Super+A / C / V / X work in every app; terminals get Ctrl+Shift+C / V so the
 -- same shortcut copies and pastes there too. Super+Ctrl+V opens the Aequalyn
