@@ -22,12 +22,14 @@ TARGET="${HOME}"
 SKEL=0
 FORCE=0
 OWNER=""
+SKIP_HYPR=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --target) TARGET=$2; shift 2 ;;
         --skel)   SKEL=1; shift ;;
         --force)  FORCE=1; shift ;;
         --owner)  OWNER=$2; shift 2 ;;
+        --skip-hypr) SKIP_HYPR=1; shift ;;
         -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
         *) printf 'unknown option: %s\n' "$1" >&2; exit 2 ;;
     esac
@@ -72,6 +74,8 @@ info "shell -> $TARGET/.config/quickshell"
 # 2. Desktop config tree. Generated colour files are only installed on a
 #    fresh home or with --force, so a user's current palette survives updates.
 for dir in hypr kitty foot fuzzel qt6ct gtk-3.0 gtk-4.0 btop matugen aequalyn quickshell mimeapps.list; do
+    # Never touch the user's hand-tuned hyprland config on updates.
+    [[ "$SKIP_HYPR" -eq 1 && "$dir" == "hypr" ]] && continue
     src="$ROOT/config/$dir"
     [[ -e "$src" ]] || continue
     dst="$TARGET/.config/$dir"
