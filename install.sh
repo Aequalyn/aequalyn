@@ -86,10 +86,24 @@ fi
 if [[ -f "$TARGET/.config/quickshell/theme.conf" ]]; then
     _saved_th=$(cat "$TARGET/.config/quickshell/theme.conf" 2>/dev/null || true)
 fi
-rm -rf "$TARGET/.config/quickshell"
-mkdir -p "$TARGET/.config/quickshell"
-cp -r "$SHELL_SRC/." "$TARGET/.config/quickshell/"
-rm -rf "$TARGET/.config/quickshell/.git"
+# Built next to the old one and swapped in only once it's complete, so a failed copy
+# leaves the working shell as it was. The shell is a git clone owned by root: its .git
+# isn't copied (parts of it are unreadable to the user, and it isn't needed here).
+# What the user made carries over: the wallpaper and theme choice and the colours
+# generated from the wallpaper (the clone ships a default wallpaper-theme.json).
+_qs="$TARGET/.config/quickshell"
+_qs_new="$TARGET/.config/.quickshell.new.$$"
+rm -rf "$_qs_new"
+mkdir -p "$_qs_new"
+tar -C "$SHELL_SRC" --exclude=./.git -cf - . | tar -C "$_qs_new" -xf -
+for _keep in wallpaper.conf theme.conf theme-switcher/wallpaper-theme.json; do
+    if [[ -f "$_qs/$_keep" ]]; then
+        mkdir -p "$(dirname "$_qs_new/$_keep")"
+        cp -f "$_qs/$_keep" "$_qs_new/$_keep"
+    fi
+done
+rm -rf "$_qs"
+mv "$_qs_new" "$_qs"
 # Clipboard capture helper is invoked by wl-paste; keep it executable here and
 # in the skel copy (archiso strips modes, so customize_airootfs.sh repeats it).
 chmod 755 "$TARGET/.config/quickshell/clipboard/capture.sh" 2>/dev/null || true
