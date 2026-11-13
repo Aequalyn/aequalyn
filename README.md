@@ -54,9 +54,9 @@ shell for [Hyprland](https://hyprland.org/), with wallpaper-driven
   Cascade) plus Hyprland's Dwindle, Master, Scrolling and Monocle. One per
   workspace, kept across reboots; `Super + L` steps through the ones you
   keep in the cycle, `Super + Alt + L` shows them all in Atelier.
-- **Folder themes** — a palette plus backgrounds, Omarchy-style. Omarchy
-  themes (`colors.toml` + `backgrounds/`) install as they are:
-  `aequalyn-themes install https://github.com/<user>/omarchy-<name>-theme`.
+- **Folder themes** — a palette plus backgrounds (`colors.toml` +
+  `backgrounds/`) install as they are:
+  `aequalyn-themes install <git-url>`.
 - **Default wallpaper** — `assets/beach.jpg`. Changing it recolours the whole
   system (shell, Hyprland, GTK, Qt, terminals, btop, hyprlock) via matugen, on
   every monitor.

@@ -1,8 +1,6 @@
 # aequalyn_palette.py — live Aequalyn theme palette for Nautilus.
 #
-# Adapted from Gtk-Omarchy-Theme-Inheritar's omarchy_palette.py, itself derived
-# from paint-omarchy-nautilus (MIT, Copyright (c) 2024 JJDizz1L).
-# https://github.com/JJDizz1L/paint-omarchy-nautilus
+# Adapted from a GTK palette helper for Nautilus (MIT, Copyright (c) 2024 JJDizz1L).
 #
 # nautilus-python runs this module inside the Nautilus process. It installs a
 # display-wide Gtk.CssProvider loaded from
