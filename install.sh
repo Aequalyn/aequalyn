@@ -106,6 +106,19 @@ for dir in hypr kitty foot fuzzel qt6ct gtk-3.0 gtk-4.0 btop matugen aequalyn qu
 done
 info "config -> $TARGET/.config"
 
+# 2b. Updates leave the user's hyprland.lua alone (above), but Aequalyn's own layout
+#     modules are part of Aequalyn, not something people tune by hand (that's user.lua):
+#     keep them current, and reload Hyprland so the running session uses them.
+if [[ "$SKIP_HYPR" -eq 1 && -d "$TARGET/.config/hypr/aequalyn" ]]; then
+    for f in geometry.lua layouts.lua keys.lua; do
+        [[ -f "$ROOT/config/hypr/aequalyn/$f" ]] && cp "$ROOT/config/hypr/aequalyn/$f" "$TARGET/.config/hypr/aequalyn/$f"
+    done
+    if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] && command -v hyprctl >/dev/null 2>&1; then
+        hyprctl reload >/dev/null 2>&1 || true
+    fi
+    info "layouts -> $TARGET/.config/hypr/aequalyn"
+fi
+
 # 3. CLI helpers
 mkdir -p "$TARGET/.local/bin"
 cp "$ROOT/bin/"* "$TARGET/.local/bin/"
