@@ -43,10 +43,14 @@ hl.env("GTK_THEME", "adw-gtk3-dark")
 hl.env("XCURSOR_THEME", "Bibata-Modern-Ice")
 
 -------------------------------------------------------------------- autostart
+-- Absolute path + `bash`: Hyprland's executor does not inherit the login
+-- shell's PATH, and mkarchiso can strip the exec bit from ~/.local/bin files.
+local session_start = "bash " .. HOME .. "/.local/bin/aequalyn-session-start"
+
 hl.on("hyprland.start", function()
     hl.exec_cmd("dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE")
     hl.exec_cmd("systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP")
-    hl.exec_cmd("aequalyn-session-start")
+    hl.exec_cmd(session_start)
 end)
 
 ------------------------------------------------------------------------ input

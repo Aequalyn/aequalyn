@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # aequalyn-session-start -- Hyprland autostart glue for the Aequalyn desktop.
-# Called once from hyprland.lua via `exec-once = aequalyn-session-start`.
+# Called from hyprland.lua via hl.on("hyprland.start") and, on the live ISO,
+# from aequalyn-live-login once the Hyprland/Wayland sockets exist. Safe to
+# call twice: qs -n refuses a second instance and every other step is idempotent.
 set -u
 export PATH="$HOME/.local/bin:$PATH"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
-log() { printf '[aequalyn-session] %s\n' "$*" >> "${XDG_STATE_HOME:-$HOME/.local/state}/aequalyn/session.log" 2>/dev/null || true; }
-mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/aequalyn" 2>/dev/null || true
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/aequalyn"
+SESSION_LOG="$STATE_DIR/session.log"
+log() { printf '[aequalyn-session] %s\n' "$*" >> "$SESSION_LOG" 2>/dev/null || true; }
+mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 # 1. Desktop services (Polkit, portals, keyring)
 if command -v systemctl >/dev/null 2>&1; then
@@ -37,9 +43,27 @@ elif command -v aequalyn-theme >/dev/null 2>&1; then
     aequalyn-theme >/dev/null 2>&1 || log "aequalyn-theme failed"
 fi
 
-# 4. The shell itself (QuickShell auto-reloads on config changes)
+# 4. The shell itself (QuickShell auto-reloads on config changes).
+#    Point qs at the config directory explicitly: on the live ISO the launcher
+#    and Hyprland's executor can disagree about XDG_CONFIG_HOME, in which case
+#    qs silently finds no configuration at all. Keep its output in the log so a
+#    QML/load failure is diagnosable instead of disappearing into /dev/null.
+QS_CONFIG="$XDG_CONFIG_HOME/quickshell"
 if command -v qs >/dev/null 2>&1; then
-    pgrep -f '/bin/qs' >/dev/null 2>&1 || qs -n -d >/dev/null 2>&1 || log "quickshell failed to start"
+    if pgrep -x qs >/dev/null 2>&1; then
+        log "quickshell already running"
+    else
+        for attempt in 1 2 3; do
+            if qs -n -d -p "$QS_CONFIG" >>"$SESSION_LOG" 2>&1; then
+                log "quickshell started (config $QS_CONFIG)"
+                break
+            fi
+            log "quickshell failed to start (attempt $attempt)"
+            sleep 1
+        done
+    fi
+else
+    log "qs not found in PATH"
 fi
 
 # 5. Idle / lock -- aequalyn-idle generates the hypridle config from the user's
