@@ -109,8 +109,7 @@
       "org.gnome.Nautilus",
       "firefox",
       "chromium",
-      "kitty",
-      "thunar"
+      "kitty"
     ],
     "iconSize": 40,
     "screen": "all"
@@ -171,5 +170,18 @@
     "enabled": true,
     "shape": "full",
     "chips": true
-  }
+  },
+  "plugins": [
+    "bar",
+    "appLauncher",
+    "notifications",
+    "atelier",
+    "osd",
+    "monitorManager",
+    "idleInhibitor",
+    "clipboard",
+    "powerMenu",
+    "docks",
+    "settings"
+  ]
 }
