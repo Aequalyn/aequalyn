@@ -59,7 +59,7 @@ The project is split across github.com/Aequalyn: `aequalyn` (core: bin/, config/
 
 ### From the live ISO (installer)
 
-- Boot the ISO: live desktop autologins as `live` into Aequalyn (Hyprland session). TTY2 is rescue/root per ISO setup.
+- Boot the ISO: SDDM autologins `live` into the guarded Aequalyn Hyprland + QuickShell session. TTY2 is rescue/root per ISO setup.
 - Inspect hardware/proposal (L1): `aequalyn-install --detect`
 - Run installer: `sudo aequalyn-install` (or keybind shown in live session, e.g. `Super+I`) — TUI wizard builds/edits `install.toml`, shows diff, applies on approval.
 - Non-interactive/apply contract: `aequalyn-install --config install.toml`

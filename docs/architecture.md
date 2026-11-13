@@ -129,10 +129,12 @@ Btrfs subvolume names match `System_Repair/system_repair.sh`:
 `archiso` releng is the base. Adding a UID-1000 `live` user to
 `airootfs/etc/passwd` makes `mkarchiso` copy `airootfs/etc/skel` into
 `/home/live` automatically — that is how the shell, wallpaper and all configs
-reach the live desktop. `getty@tty1` autologins that user into
-`aequalyn-live-login` → `dbus-run-session -- Hyprland`; tty2 autologins root for
-rescue. The offline repo is a local pacman repo generated with `repo-add` from
-`pacman -Sw`, so `pacstrap -C /etc/pacman-offline.conf` works with no network.
+reach the live desktop. SDDM (enabled as `display-manager.service`) autologs
+`live` into the `aequalyn` Wayland session, which runs the guarded
+`aequalyn-live-session` wrapper → `start-hyprland` exactly once; tty2 keeps a
+root autologin for rescue. The offline repo is a local pacman repo generated
+with `repo-add` from `pacman -Sw`, so `pacstrap -C /etc/pacman-offline.conf`
+works with no network.
 
 ## Bluetooth
 
