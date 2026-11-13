@@ -6,6 +6,7 @@
 #   ./install.sh --target /home/alice    install into another user's home
 #   ./install.sh --target /etc/skel --skel   populate the ISO skeleton
 #                                            (paths stay HOME-relative)
+#   --skip-hypr / --with-hypr                force skip / install Hyprland config
 #
 # The desktop is spread over several repositories of the Aequalyn
 # organisation. The shell and the themes are looked up, in order, at
@@ -23,6 +24,7 @@ SKEL=0
 FORCE=0
 OWNER=""
 SKIP_HYPR=0
+WITH_HYPR=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --target) TARGET=$2; shift 2 ;;
@@ -30,10 +32,23 @@ while [[ $# -gt 0 ]]; do
         --force)  FORCE=1; shift ;;
         --owner)  OWNER=$2; shift 2 ;;
         --skip-hypr) SKIP_HYPR=1; shift ;;
+        --with-hypr) WITH_HYPR=1; shift ;;
         -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
         *) printf 'unknown option: %s\n' "$1" >&2; exit 2 ;;
     esac
 done
+
+# By default, never clobber an existing user's Hyprland config on re-runs:
+# treat a present hyprland.lua as "this is an update, keep the user's setup".
+# Fresh installs (--skel, or targets without hyprland.lua) still get the
+# shipped defaults. --with-hypr forces installing them; --skip-hypr forces skipping.
+if [[ $WITH_HYPR -eq 1 ]]; then
+    SKIP_HYPR=0
+elif [[ $SKEL -eq 1 ]]; then
+    SKIP_HYPR=0
+elif [[ -f "$TARGET/.config/hypr/hyprland.lua" ]]; then
+    SKIP_HYPR=1
+fi
 
 info() { printf '\033[0;34m[aequalyn-install]\033[0m %s\n' "$*"; }
 

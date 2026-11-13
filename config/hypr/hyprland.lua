@@ -72,7 +72,7 @@ hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })
 ---------------------------------------------------------------------- keybinds
 local M      = "SUPER"
 local term   = "kitty"
-local files  = "thunar"
+local files  = "nautilus"
 local menu   = "fuzzel"
 
 -- Apps & Aequalyn shell
@@ -171,6 +171,7 @@ hl.layer_rule({ name = "aequalyn-blur-shell",  match = { namespace = "quickshell
 hl.layer_rule({ name = "aequalyn-blur-aequalyn",   match = { namespace = "aequalyn-.*" },      blur = true })
 hl.layer_rule({ name = "aequalyn-noanim-osd",  match = { namespace = "quickshell-osd" }, no_anim = true })
 hl.layer_rule({ name = "aequalyn-ignorezero",  match = { namespace = "quickshell-.*" }, ignore_alpha = true })
+hl.layer_rule({ name = "aequalyn-dock-noblur", match = { namespace = "aequalyn-dock-plain" }, blur = false, ignore_alpha = true })
 
 -------------------------------------------------------------------------- misc
 hl.config({
