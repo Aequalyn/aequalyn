@@ -85,11 +85,10 @@ hl.bind(M .. " + COMMA",   hl.dsp.exec_cmd("qs ipc call aequalyn settings"))
 hl.bind(M .. " + L",         hl.dsp.exec_cmd("aequalyn-layout next"))
 hl.bind(M .. " + SHIFT + L", hl.dsp.exec_cmd("aequalyn-layout prev"))
 hl.bind(M .. " + ALT + L",   hl.dsp.exec_cmd("qs ipc call atelier toggle layouts"))
-hl.bind(M .. " + Z",         hl.dsp.layout("promote"))
 hl.bind(M .. " + CTRL + left",  hl.dsp.layout("swapprev"))
 hl.bind(M .. " + CTRL + right", hl.dsp.layout("swapnext"))
-hl.bind(M .. " + ALT + minus",  hl.dsp.layout("shrink"), { repeating = true })
-hl.bind(M .. " + ALT + equal",  hl.dsp.layout("grow"),   { repeating = true })
+-- Super + Ctrl + L (pick a layout), Super + Z, Super + - / =, Alt + Tab and the arrow
+-- keys below are made layout-aware in aequalyn/keys.lua, as in Tableau.
 
 -- Atelier: themes, wallpapers, rotation and palette in one picker
 hl.bind(M .. " + T",       hl.dsp.exec_cmd("qs ipc call atelier toggle themes"))
@@ -114,14 +113,7 @@ hl.bind(M .. " + J", hl.dsp.layout("togglesplit"))
 hl.bind(M .. " + SHIFT + M", hl.dsp.exec_cmd("qs ipc call power toggle"))
 
 -- Focus / move
-hl.bind(M .. " + left",        hl.dsp.focus({ direction = "left" }))
-hl.bind(M .. " + right",       hl.dsp.focus({ direction = "right" }))
-hl.bind(M .. " + up",          hl.dsp.focus({ direction = "up" }))
-hl.bind(M .. " + down",        hl.dsp.focus({ direction = "down" }))
-hl.bind(M .. " + SHIFT + left",  hl.dsp.window.move({ direction = "left" }))
-hl.bind(M .. " + SHIFT + right", hl.dsp.window.move({ direction = "right" }))
-hl.bind(M .. " + SHIFT + up",    hl.dsp.window.move({ direction = "up" }))
-hl.bind(M .. " + SHIFT + down",  hl.dsp.window.move({ direction = "down" }))
+-- Super + arrows (focus) and Super + Shift + arrows (swap): aequalyn/keys.lua
 
 -- Workspaces
 for i = 1, 10 do

@@ -157,9 +157,14 @@ Everything works without AI.
 | `Super + Ctrl + Space` | Next wallpaper |
 | `Super + L` / `Super + Shift + L` | Next / previous window layout |
 | `Super + Alt + L` | Atelier: layouts |
+| `Super + Ctrl + L`, then `1`–`9` | Dwindle, Scrolling, Master, Portrait, Landscape, Centerpiece, Diptych Left, Diptych Right, Mosaic |
+| `Super + Ctrl + L`, `0`, then `1`–`0`, `-`, `=` | Strip, Column, Spiral, Gallery Right, Gallery Bottom, Gallery Left, Gallery Top, Spread, Diptych Top, Diptych Bottom, Triptych, Bento |
 | `Super + Z` | Make the focused window the main one |
-| `Super + Ctrl + ←/→` | Swap the focused window with its neighbour |
-| `Super + Alt + - / =` | Main pane smaller / larger (this workspace) |
+| `Super + ←/→/↑/↓` | Focus the nearest window that way |
+| `Super + Shift + ←/→/↑/↓` | Swap with the nearest window that way |
+| `Alt + Tab` / `Alt + Shift + Tab` | Step through the windows; let go of Alt to make that one the main window |
+| `Super + Ctrl + ←/→` | Swap the focused window with the previous / next in the layout |
+| `Super + -` / `=` | Main pane larger / smaller, held to keep going (`Alt`: finer, `Ctrl`: coarser) |
 | `Super + O` | Display manager |
 | `Super + C` / `V` / `X` / `A` | Universal copy / paste / cut / select-all |
 | `Super + Ctrl + V` | Clipboard history (text + images) |
