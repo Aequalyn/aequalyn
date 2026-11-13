@@ -62,6 +62,15 @@ THEMES_SRC=$(resolve_repo aequalyn-themes themes "${AEQUALYN_THEMES_DIR:-}" || t
 mkdir -p "$TARGET"
 
 # 1. QuickShell config (real copy, not a symlink: /etc/skel must be portable)
+# Preserve the user's current wallpaper/theme selection across updates.
+_saved_wp=""
+_saved_th=""
+if [[ -f "$TARGET/.config/quickshell/wallpaper.conf" ]]; then
+    _saved_wp=$(cat "$TARGET/.config/quickshell/wallpaper.conf" 2>/dev/null || true)
+fi
+if [[ -f "$TARGET/.config/quickshell/theme.conf" ]]; then
+    _saved_th=$(cat "$TARGET/.config/quickshell/theme.conf" 2>/dev/null || true)
+fi
 rm -rf "$TARGET/.config/quickshell"
 mkdir -p "$TARGET/.config/quickshell"
 cp -r "$SHELL_SRC/." "$TARGET/.config/quickshell/"
@@ -107,13 +116,21 @@ info "bin -> $TARGET/.local/bin"
 mkdir -p "$TARGET/Pictures/Wallpapers"
 cp "$ROOT/assets/beach.jpg" "$TARGET/Pictures/Wallpapers/"
 if [[ $SKEL -eq 0 ]]; then
-    printf '%s' "$TARGET/Pictures/Wallpapers/beach.jpg" > "$TARGET/.config/quickshell/wallpaper.conf"
+    if [[ -n "$_saved_wp" ]]; then
+        printf '%s' "$_saved_wp" > "$TARGET/.config/quickshell/wallpaper.conf"
+    else
+        printf '%s' "$TARGET/Pictures/Wallpapers/beach.jpg" > "$TARGET/.config/quickshell/wallpaper.conf"
+    fi
 else
     # /etc/skel has no absolute path yet; aequalyn-session-start falls back to
     # $HOME/Pictures/Wallpapers/beach.jpg.
     rm -f "$TARGET/.config/quickshell/wallpaper.conf"
 fi
-printf 'wallpaper' > "$TARGET/.config/quickshell/theme.conf"
+if [[ -n "$_saved_th" ]]; then
+    printf '%s' "$_saved_th" > "$TARGET/.config/quickshell/theme.conf"
+else
+    printf 'wallpaper' > "$TARGET/.config/quickshell/theme.conf"
+fi
 
 # 4b. Themes (folder themes with palettes + backgrounds). Packaged installs
 #     ship them in /usr/share/aequalyn/themes; a home install keeps a copy in
