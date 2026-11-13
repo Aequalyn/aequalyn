@@ -7,6 +7,7 @@ cats = {
     "browser": ["WebBrowser"],
     "videoPlayer": ["VideoPlayer", "Player"],
     "terminal": ["TerminalEmulator"],
+    "fileManager": ["FileManager"],
 }
 apps = {k: [] for k in cats}
 seen = set()
@@ -52,6 +53,7 @@ current = {
     "textEditor": q("text/plain"),
     "browser": q("text/html"),
     "videoPlayer": q("video/mp4"),
+    "fileManager": q("inode/directory"),
 }
 
 term = ""
