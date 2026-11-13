@@ -127,9 +127,15 @@ if [[ ! -f "$TARGET/.config/aequalyn/settings.json" ]]; then
     cp "$ROOT/config/aequalyn/settings.json" "$TARGET/.config/aequalyn/settings.json"
 fi
 
-# 6. Desktop entry for the installer (live session convenience)
-mkdir -p "$TARGET/.local/share/applications"
-cat > "$TARGET/.local/share/applications/aequalyn-install.desktop" <<'EOF'
+# 6. Desktop entry for the installer (live session convenience).
+# Only created on the live ISO (/etc/skel) and not on a real target home,
+# so it doesn't linger after install. Skip on --skel (the ISO image carries
+# its own copy in /usr/share/applications).
+if [[ $SKEL -eq 1 ]]; then
+    # issue 1: the live ISO keeps the "Install Aequalyn" launcher in
+    # /etc/skel so the live session can start the installer from the menu.
+    mkdir -p "$TARGET/.local/share/applications"
+    cat > "$TARGET/.local/share/applications/aequalyn-install.desktop" <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=Install Aequalyn
@@ -139,6 +145,13 @@ Icon=system-software-install
 Terminal=false
 Categories=System;
 EOF
+else
+    # issue 1: a real install targets a user's home, not /etc/skel, so the
+    # installer's desktop entry must never be created there -- and a stale
+    # one left by an older/live install is removed so it doesn't linger
+    # in ~/.local/share/applications after install.
+    rm -f "$TARGET/.local/share/applications/aequalyn-install.desktop"
+fi
 
 # 7. Nautilus palette extension (live-reloaded by Aequalyn theme tools)
 if [[ -f "$ROOT/config/nautilus-python/extensions/aequalyn_palette.py" ]]; then
