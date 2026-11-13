@@ -13,6 +13,8 @@
 --   SUPER + Z                   bring the focused window forward
 --   SUPER + - / =               the main window larger / smaller, a step at a time,
 --                               and on while held (ALT: finer, CTRL: coarser)
+--   a click on a small window   on a Focus layout (Portrait, Landscape, Centerpiece,
+--                               Stage, Theatre, the Galleries) makes it the main one
 --
 -- On Aequalyn's own layouts these go by where the windows are on screen and by the
 -- layout's order; on Hyprland's (Dwindle, Master, Scrolling, Monocle) they do what
@@ -178,6 +180,39 @@ local function pick(key)
   end
 end
 
+-- A click on a small window of a Focus layout brings it forward. The mouse buttons are
+-- only watched (the click still goes to the window), and once Hyprland has focused the
+-- clicked window, it's made the main one if it isn't yet. That also covers a click on a
+-- small window that has the focus already, which changes no focus. SUPER + a button
+-- moves and resizes windows, so it's left alone; and the pointer merely passing over a
+-- window (focus follows the mouse) brings nothing forward.
+local FOCUS = {}
+for _, entry in ipairs(L and L.geometry and L.geometry.catalogue or {}) do
+  if entry.group == "Focus" then FOCUS["lua:aq-" .. entry.id] = true end
+end
+local function super_down()
+  for _, key in ipairs({ "Super_L", "Super_R" }) do
+    local ok, down = pcall(hl.is_key_down, key)
+    if ok and down then return true end
+  end
+  return false
+end
+local presses = 0
+function K.clicked()
+  presses = presses + 1
+  local mine = presses
+  hl.timer(function()
+    if mine ~= presses or super_down() then return end
+    local ws, w = focused()
+    if not (ws and FOCUS[ws.tiled_layout] and w.at and w.size) then return end
+    if L.order(ws.id)[1] == w.stable_id then return end
+    local ok, pos = pcall(hl.get_cursor_pos)
+    if not ok or type(pos) ~= "table" or type(pos.x) ~= "number" then return end
+    if pos.x < w.at.x or pos.y < w.at.y or pos.x >= w.at.x + w.size.x or pos.y >= w.at.y + w.size.y then return end
+    K.promote()
+  end, { timeout = 1, type = "oneshot" })
+end
+
 local KEYS = {}            -- every combination bound here, so they can be cleared first
 local function bind(keys, fn, opts)
   KEYS[#KEYS + 1] = keys
@@ -205,6 +240,10 @@ function K.apply()
   end
 
   bind("SUPER + CTRL + L", function() hl.dispatch(hl.dsp.submap("aq-layout-picker")) end)
+  for _, button in ipairs({ "mouse:272", "mouse:273", "mouse:274" }) do
+    pcall(bind, button, K.clicked,
+      { non_consuming = true, ignore_mods = true, dont_inhibit = true, submap_universal = true })
+  end
   if not submaps_defined then
     submaps_defined = true
     hl.define_submap("aq-layout-picker", function()
