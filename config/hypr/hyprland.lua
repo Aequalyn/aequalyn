@@ -71,13 +71,34 @@ hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })
 
 ---------------------------------------------------------------------- keybinds
 local M      = "SUPER"
-local term   = "kitty"
-local files  = "nautilus"
-local menu   = "fuzzel"
+-- Resolve the default terminal / file manager / browser from the XDG defaults
+-- so the keybinds below follow the choices made in Settings -> Default apps.
+local function _xdg_default(mime, fallback)
+    local f = io.popen("xdg-mime query default " .. mime .. " 2>/dev/null")
+    local id = f and f:read("*l") or ""
+    if f then f:close() end
+    id = id and id:gsub("%s+", "") or ""
+    if id ~= "" then return "gtk-launch " .. id:gsub("%.desktop$", "") end
+    return fallback
+end
+local function _terminal_default(fallback)
+    local path = os.getenv("HOME") .. "/.config/xdg-terminals.list"
+    local f = io.open(path, "r")
+    local id = ""
+    if f then id = f:read("*l") or ""; f:close() end
+    id = id:gsub("%s+", "")
+    if id ~= "" then return "gtk-launch " .. id:gsub("%.desktop$", "") end
+    return fallback
+end
+local term    = _terminal_default("kitty")
+local files   = _xdg_default("inode/directory", "nautilus")
+local browser = _xdg_default("text/html", "chromium")
+local menu    = "fuzzel"
 
 -- Apps & Aequalyn shell
 hl.bind(M .. " + RETURN",  hl.dsp.exec_cmd(term))
 hl.bind(M .. " + E",       hl.dsp.exec_cmd(files))
+hl.bind(M .. " + B",       hl.dsp.exec_cmd(browser))
 hl.bind(M .. " + SPACE",   hl.dsp.exec_cmd(menu))
 hl.bind(M .. " + D",       hl.dsp.exec_cmd("qs ipc call launcher toggle"))
 hl.bind(M .. " + COMMA",   hl.dsp.exec_cmd("qs ipc call aequalyn settings"))
