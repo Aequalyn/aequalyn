@@ -6,7 +6,9 @@
 --   others    what the windows you're not using wear: "theme" (the theme's inactive
 --             border), "same" (the focused window's outline, its gradient included)
 --             or "hidden" (no outline)
--- Both come from layouts.lua's options (aequalyn-layout option outline / others).
+--   flash     both windows of a swap (Super + Shift + arrows, Super + Z, Alt + Tab) light
+--             up in the accent color for a moment, so it's clear which two traded places
+-- All come from layouts.lua's options (aequalyn-layout option outline / others / flash).
 -- The rules are made once the config has loaded, so they use the theme's colors
 -- (colors.lua loads after the layouts).
 
@@ -16,6 +18,8 @@ local T = {}
 _G.aequalyn_tiles = T
 
 local TAG = "aq-tile"
+local SWAP = "aq-swap"
+local FLASH_MS = 700
 
 local function has_tag(window, name)
   for _, tag in ipairs(type(window.tags) == "table" and window.tags or {}) do
@@ -69,7 +73,31 @@ function T.rules()
     tile.border_color = active .. " rgba(00000000) 0deg"
   end
   pcall(hl.window_rule, tile)
+  -- after the tile rule, so it wins while it lasts; color only, so nothing re-lays out
+  pcall(hl.window_rule, { name = "aequalyn-swap", match = { tag = SWAP }, opacity = "1.0 1.0",
+                          border_color = accent("ff") .. " " .. accent("ff") })
 end
+
+-- light up both windows of a swap; a window flashed again before its last flash ended
+-- keeps the newer one
+local flash_gen = {}
+function T.flash(windows)
+  if opts().flash == false then return end
+  for _, w in ipairs(windows or {}) do
+    if w and w.address then
+      local key = w.address
+      local gen = (flash_gen[key] or 0) + 1
+      flash_gen[key] = gen
+      tag_window(w, SWAP, true)
+      hl.timer(function()
+        if flash_gen[key] ~= gen then return end
+        flash_gen[key] = nil
+        pcall(tag_window, w, SWAP, false)
+      end, { timeout = FLASH_MS, type = "oneshot" })
+    end
+  end
+end
+if _G.aequalyn_keys then _G.aequalyn_keys.flashed = T.flash end
 
 -- tag the windows that should wear it, untag the rest (left from another layout or a
 -- reload, or turned off)

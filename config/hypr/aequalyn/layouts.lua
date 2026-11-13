@@ -21,8 +21,8 @@ _G.aequalyn_layouts = M
 
 -- Defaults; workspace-layouts.lua replaces them through M.configure().
 -- step: how much one press of Super + - / = changes the main pane (keys.lua);
--- outline (px, nil = as the theme) and others (theme | same | hidden): tiles.lua
-M.opts = { pane = 0.62, middle = 0.56, gap = 24, step = 0.01 }
+-- outline (px, nil = as the theme), others (theme | same | hidden) and flash: tiles.lua
+M.opts = { pane = 0.62, middle = 0.56, gap = 24, step = 0.01, flash = true }
 M.pane_by_ws = {}          -- workspace id -> pane share changed with the resize keys
 local slots = {}           -- workspace id -> ordered list of window stable ids
 
