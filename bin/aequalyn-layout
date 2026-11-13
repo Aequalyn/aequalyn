@@ -7,9 +7,11 @@
 #   aequalyn-layout set <layout> [--workspace N]
 #   aequalyn-layout next | prev [--workspace N]   step through the Super + L cycle
 #   aequalyn-layout cycle [layout ...]         print or set the layouts Super + L goes through
-#   aequalyn-layout option pane|middle|gap|step|notify <value>
+#   aequalyn-layout option pane|middle|gap|step|notify|outline|others <value>
 #       step: how much one press of Super + - / = changes the main pane (0.0025 .. 0.05)
 #       notify: true | false, a notification with the layout's name when it changes
+#       outline: theme | 0 .. 10, the border (px) of windows on Aequalyn's layouts
+#       others: theme | same | hidden, what the windows you're not using wear
 #   aequalyn-layout status                     JSON: workspaces, cycle, options
 #   aequalyn-layout apply                      rewrite workspace-layouts.lua and reload
 #
@@ -65,17 +67,21 @@ lua_num() { [[ "$1" =~ ^[0-9]+([.][0-9]+)?$ ]] && printf '%s' "$1" || printf '%s
 # Write workspace-layouts.lua from settings.json.
 write_rules() {
     mkdir -p "$(dirname "$RULES")"
-    local pane middle gap step def tmp
+    local pane middle gap step outline others def tmp
     pane=$(lua_num "$(setting .layouts.pane)" 0.62)
     middle=$(lua_num "$(setting .layouts.middle)" 0.56)
     gap=$(lua_num "$(setting .layouts.gap)" 24)
     step=$(lua_num "$(setting .layouts.step)" 0.01)
+    # outline: a number, or nothing for "as the theme"; others: one of three words
+    outline=$(setting .layouts.outline); [[ "$outline" =~ ^([0-9]|10)$ ]] || outline=""
+    others=$(setting .layouts.others); [[ "$others" =~ ^(same|hidden)$ ]] || others=theme
     def=$(setting .layouts.default)
     tmp=$(mktemp "$RULES.XXXXXX")
     {
         printf -- '-- Written by aequalyn-layout from settings.json (.layouts). Do not edit.\n'
         printf 'local L = _G.aequalyn_layouts\n'
-        printf 'if L then L.configure({ pane = %s, middle = %s, gap = %s, step = %s }) end\n' "$pane" "$middle" "$gap" "$step"
+        printf 'if L then L.configure({ pane = %s, middle = %s, gap = %s, step = %s, others = %s%s }) end\n' \
+            "$pane" "$middle" "$gap" "$step" "$(lua_str "$others")" "${outline:+, outline = $outline}"
         if [[ -n "$def" ]]; then
             printf 'hl.config({ general = { layout = %s } })\n' "$(lua_str "$def")"
         fi
@@ -152,7 +158,7 @@ case "$cmd" in
         [[ ${#ids[@]} -ge 2 ]] || die "the cycle needs at least two layouts"
         aequalyn-settings set .layouts.cycle "$(printf '%s\n' "${ids[@]}" | jq -R . | jq -s -c .)" >/dev/null ;;
     option)
-        [[ $# -eq 2 ]] || die "usage: option pane|middle|gap|step|notify <value>"
+        [[ $# -eq 2 ]] || die "usage: option pane|middle|gap|step|notify|outline|others <value>"
         case "$1" in
             pane|middle) awk -v v="$2" 'BEGIN { exit !(v >= 0.3 && v <= 0.85) }' || die "$1 must be 0.30 .. 0.85" ;;
             gap) [[ "$2" =~ ^[0-9]+$ && "$2" -le 120 ]] || die "gap must be 0 .. 120" ;;
@@ -160,6 +166,10 @@ case "$cmd" in
                       || die "step must be 0.0025 .. 0.05" ;;
             notify) [[ "$2" == true || "$2" == false ]] || die "notify must be true or false"
                     aequalyn-settings set .layouts.notify "$2" >/dev/null; exit 0 ;;
+            outline) if [[ "$2" == theme ]]; then aequalyn-settings del .layouts.outline >/dev/null; write_rules; reload; exit 0; fi
+                     [[ "$2" =~ ^([0-9]|10)$ ]] || die "outline must be theme or 0 .. 10" ;;
+            others) [[ "$2" =~ ^(theme|same|hidden)$ ]] || die "others must be theme, same or hidden"
+                    aequalyn-settings set .layouts.others "$(jq -n --arg v "$2" '$v')" >/dev/null; write_rules; reload; exit 0 ;;
             *) die "unknown option: $1" ;;
         esac
         aequalyn-settings set ".layouts.$1" "$2" >/dev/null
@@ -170,7 +180,8 @@ case "$cmd" in
             --argjson cycle "$(cycle_list | jq -R . | jq -s -c .)" \
             '{focused: $focused, workspaces: ($s.workspaces // {}), default: ($s.default // "dwindle"),
               cycle: $cycle, pane: ($s.pane // 0.62), middle: ($s.middle // 0.56), gap: ($s.gap // 24),
-              step: ($s.step // 0.01), notify: ($s.notify != false)}' ;;
+              step: ($s.step // 0.01), notify: ($s.notify != false),
+              outline: ($s.outline // "theme"), others: ($s.others // "theme")}' ;;
     apply)
         write_rules; reload ;;
     -h|--help|"")
