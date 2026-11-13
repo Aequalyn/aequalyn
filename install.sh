@@ -117,6 +117,14 @@ for dir in hypr kitty foot fuzzel qt6ct gtk-3.0 gtk-4.0 btop matugen aequalyn qu
     src="$ROOT/config/$dir"
     [[ -e "$src" ]] || continue
     dst="$TARGET/.config/$dir"
+    # config/quickshell only holds first-run seeds (theme.conf, the default
+    # theme-switcher/wallpaper-theme.json) next to the shell copied above: never
+    # overwrite what's there, at any depth, or every update resets the user's colours
+    if [[ "$dir" == quickshell && $FORCE -eq 0 ]]; then
+        mkdir -p "$dst"
+        cp -rn "$src/." "$dst/"
+        continue
+    fi
     if [[ -d "$src" ]]; then
         mkdir -p "$dst"
         for f in "$src"/* "$src"/.[!.]*; do
