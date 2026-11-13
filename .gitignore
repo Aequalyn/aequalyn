@@ -1,3 +1,6 @@
 .DS_Store
 **/__pycache__/
 *.pyc
+
+# shell is its own repository (aequalyn-shell)
+shell/
