@@ -80,56 +80,7 @@ hl.config({
 
 hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })
 
----------------------------------------------------------------------- per-monitor workspaces
-local SLOTS = 10
-
-local function is_internal(name)
-    return name:match("^eDP") or name:match("^LVDS") or name:match("^DSI")
-end
-
-local function connected_monitors()
-    local mons = {}
-    for _, m in ipairs(hl.get_monitors()) do
-        if not m.is_mirror then mons[#mons + 1] = m end
-    end
-    table.sort(mons, function(a, b)
-        local ai = is_internal(a.name)
-        local bi = is_internal(b.name)
-        if (ai ~= nil) ~= (bi ~= nil) then return ai ~= nil end
-        return a.id < b.id
-    end)
-    return mons
-end
-
-local blocks = {}
-local mons = connected_monitors()
-for idx, m in ipairs(mons) do blocks[m.name] = idx - 1 end
-
-local function block_of(name)
-    return blocks[name] or 0
-end
-
-local function ws_id(monitor_name, slot)
-    return block_of(monitor_name) * SLOTS + slot
-end
-
-local function ws_focus(slot)
-    local mon = hl.get_active_monitor()
-    if not mon then return end
-    local id = ws_id(mon.name, slot)
-    hl.dispatch(hl.dsp.focus({ workspace = tostring(id) }))
-end
-
-local function ws_move(slot)
-    local mon = hl.get_active_monitor()
-    local win = hl.get_active_window()
-    if not mon or not win then return end
-    local id = ws_id(mon.name, slot)
-    hl.dispatch(hl.dsp.window.move({ workspace = tostring(id) }))
-end
-
-local function make_focus(slot) return function() ws_focus(slot) end end
-local function make_move(slot) return function() ws_move(slot) end end
+---------------------------------------------------------------------- workspaces
 
 ---------------------------------------------------------------------- keybinds
 local M      = "SUPER"
@@ -201,8 +152,8 @@ hl.bind(M .. " + SHIFT + M", hl.dsp.exec_cmd("qs ipc call power toggle"))
 -- Workspaces
 for i = 1, 10 do
     local key = tostring(i % 10)
-    hl.bind(M .. " + " .. key,        make_focus(i))
-    hl.bind(M .. " + SHIFT + " .. key, make_move(i))
+    hl.bind(M .. " + " .. key,        hl.dsp.focus({ workspace = "m~" .. i }))
+    hl.bind(M .. " + SHIFT + " .. key,  hl.dsp.window.move({ workspace = "m~" .. i }))
 end
 hl.bind(M .. " + S",        hl.dsp.workspace.toggle_special("magic"))
 hl.bind(M .. " + SHIFT + S",  hl.dsp.window.move({ workspace = "special:magic" }))
