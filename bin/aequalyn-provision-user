@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# aequalyn:summary=Link Aequalyn shell agent skills into each agent harness's skill dirs
+set -euo pipefail
+
+AEQUALYN_PATH="${AEQUALYN_PATH:-/usr/share/aequalyn}"
+SKILLS_DIR="$AEQUALYN_PATH/shell/default/agents/skills"
+
+if [[ ! -d "$SKILLS_DIR" ]]; then
+  # fall back to a dev checkout
+  for cand in /home/mihai/Projects/aequalyn-shell /opt/aequalyn/shell; do
+    if [[ -d "$cand/default/agents/skills" ]]; then
+      SKILLS_DIR="$cand/default/agents/skills"
+      AEQUALYN_PATH="$(dirname "$(dirname "$cand")")"
+      break
+    fi
+  done
+fi
+
+if [[ ! -d "$SKILLS_DIR" ]]; then
+  echo "aequalyn-provision-user: no skills dir found" >&2
+  exit 1
+fi
+
+mkdir -p ~/.agents/skills ~/.claude/skills ~/.codex/skills ~/.pi/agent/skills ~/.gemini/config/skills ~/.hermes/skills
+for skill in "$SKILLS_DIR"/*/; do
+  skill=${skill%/}
+  name=${skill##*/}
+  ln -sfn "$skill" ~/.agents/skills/"$name"
+  ln -sfn "$skill" ~/.claude/skills/"$name"
+  ln -sfn "$skill" ~/.codex/skills/"$name"
+  ln -sfn "$skill" ~/.pi/agent/skills/"$name"
+  ln -sfn "$skill" ~/.gemini/config/skills/"$name"
+  ln -sfn "$skill" ~/.hermes/skills/"$name"
+  if [[ -d ~/.hermes/profiles ]]; then
+    for profile in ~/.hermes/profiles/*/; do
+      [[ -d $profile ]] || continue
+      mkdir -p "$profile/skills"
+      ln -sfn "$skill" "$profile/skills/$name"
+    done
+  fi
+done
+
+echo "Provisioned Aequalyn shell skills from $SKILLS_DIR"
