@@ -2,27 +2,47 @@
 # aequalyn:summary=Link Aequalyn shell agent skills into each agent harness's skill dirs
 set -euo pipefail
 
-AEQUALYN_PATH="${AEQUALYN_PATH:-/usr/share/aequalyn}"
-SKILLS_DIR="$AEQUALYN_PATH/shell/default/agents/skills"
+# Create the agent skill folders up front so they exist in the user's home even
+# when no skill source is available yet.
+mkdir -p ~/.agents/skills ~/.claude/skills ~/.codex/skills ~/.pi/agent/skills ~/.gemini/config/skills ~/.hermes/skills
 
-if [[ ! -d "$SKILLS_DIR" ]]; then
-  # fall back to a dev checkout
+# Locate the skills directory. Honour an explicit override, then the installed
+# tree, then a few well-known dev/clone locations.
+SKILLS_DIR=""
+candidates=()
+[[ -n "${AEQUALYN_SKILLS_DIR:-}" ]] && candidates+=("$AEQUALYN_SKILLS_DIR")
+[[ -n "${AEQUALYN_SHELL_DIR:-}" ]] && candidates+=("$AEQUALYN_SHELL_DIR" "$AEQUALYN_SHELL_DIR/default")
+[[ -n "${AEQUALYN_PATH:-}" ]] && candidates+=("$AEQUALYN_PATH/shell" "$AEQUALYN_PATH/shell/default" "$AEQUALYN_PATH")
+candidates+=("/usr/share/aequalyn/shell" "/usr/share/aequalyn/shell/default")
+candidates+=("/home/mihai/Projects/aequalyn-shell" "/opt/aequalyn/shell")
+
+for base in "${candidates[@]}"; do
+  [[ -z "$base" ]] && continue
+  for sub in "" "/default"; do
+    if [[ -d "$base$sub/agents/skills" ]]; then
+      SKILLS_DIR="$base$sub/agents/skills"
+      break 2
+    fi
+  done
+done
+
+if [[ -z "$SKILLS_DIR" ]]; then
+  # Last resort: search a couple of common dev locations directly.
   for cand in /home/mihai/Projects/aequalyn-shell /opt/aequalyn/shell; do
     if [[ -d "$cand/default/agents/skills" ]]; then
       SKILLS_DIR="$cand/default/agents/skills"
-      AEQUALYN_PATH="$(dirname "$(dirname "$cand")")"
       break
     fi
   done
 fi
 
-if [[ ! -d "$SKILLS_DIR" ]]; then
-  echo "aequalyn-provision-user: no skills dir found" >&2
-  exit 1
+if [[ -z "$SKILLS_DIR" || ! -d "$SKILLS_DIR" ]]; then
+  echo "aequalyn-provision-user: no skills dir found; created empty agent folders" >&2
+  exit 0
 fi
 
-mkdir -p ~/.agents/skills ~/.claude/skills ~/.codex/skills ~/.pi/agent/skills ~/.gemini/config/skills ~/.hermes/skills
 for skill in "$SKILLS_DIR"/*/; do
+  [[ -d "$skill" ]] || continue
   skill=${skill%/}
   name=${skill##*/}
   ln -sfn "$skill" ~/.agents/skills/"$name"

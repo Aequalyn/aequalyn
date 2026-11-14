@@ -5,6 +5,13 @@
 # call twice: qs -n refuses a second instance and every other step is idempotent.
 set -u
 export PATH="$HOME/.local/bin:$PATH"
+
+# Ensure agent skill folders (.agents, .claude, ...) exist so AI assistants
+# can load Aequalyn's SKILL.md. Idempotent.
+mkdir -p "$HOME/.agents/skills" "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.pi/agent/skills" "$HOME/.gemini/config/skills" "$HOME/.hermes/skills" 2>/dev/null || true
+if command -v aequalyn-provision-user >/dev/null 2>&1; then
+    aequalyn-provision-user >/dev/null 2>&1 || true
+fi
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
