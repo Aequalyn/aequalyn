@@ -76,9 +76,15 @@ DEFAULT_APPS = [
      "key": "D", "icon": "aequalyn-webapp-reddit"},
     {"name": "ChatGPT", "slug": "chatgpt", "url": "https://chatgpt.com/",
      "key": "G", "icon": "aequalyn-webapp-chatgpt"},
+    {"name": "YouTube", "slug": "youtube", "url": "https://www.youtube.com/",
+     "key": "T", "icon": "aequalyn-webapp-youtube"},
     {"name": "YouTube Music", "slug": "youtube-music",
      "url": "https://music.youtube.com/", "key": "Y",
      "icon": "aequalyn-webapp-youtube-music"},
+    {"name": "WhatsApp", "slug": "whatsapp", "url": "https://web.whatsapp.com/",
+     "key": "H", "icon": "aequalyn-webapp-whatsapp"},
+    {"name": "Gmail", "slug": "gmail", "url": "https://mail.google.com/",
+     "key": "E", "icon": "aequalyn-webapp-gmail"},
 ]
 
 # id -> (label, kind, binary, desktop id)
