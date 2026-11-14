@@ -115,19 +115,19 @@ hl.bind(M .. " + B",       hl.dsp.exec_cmd(browser))
 hl.bind(M .. " + SPACE",   hl.dsp.exec_cmd(menu))
 hl.bind(M .. " + D",       hl.dsp.exec_cmd("qs ipc call launcher toggle"))
 hl.bind(M .. " + COMMA",   hl.dsp.exec_cmd("qs ipc call aequalyn settings"))
--- Window layouts: Super + L steps through them, Atelier shows them all
+-- Window layouts: Super + L steps through them, the control center shows them all
 hl.bind(M .. " + L",         hl.dsp.exec_cmd("aequalyn-layout next"))
 hl.bind(M .. " + SHIFT + L", hl.dsp.exec_cmd("aequalyn-layout prev"))
-hl.bind(M .. " + ALT + L",   hl.dsp.exec_cmd("qs ipc call atelier toggle layouts"))
+hl.bind(M .. " + ALT + L",   hl.dsp.exec_cmd("qs ipc call aequalyn page arrange"))
 hl.bind(M .. " + CTRL + left",  hl.dsp.layout("swapprev"))
 hl.bind(M .. " + CTRL + right", hl.dsp.layout("swapnext"))
 -- Super + Ctrl + L (pick a layout), Super + Z, Super + - / =, Alt + Tab and the arrow
 -- keys below are made layout-aware in aequalyn/keys.lua, as in Tableau.
 
--- Atelier: themes, wallpapers, rotation and palette in one picker
+-- The theme and wallpaper picker, over the blurred desktop
 hl.bind(M .. " + T",       hl.dsp.exec_cmd("qs ipc call atelier toggle themes"))
 hl.bind(M .. " + W",       hl.dsp.exec_cmd("qs ipc call atelier toggle wallpapers"))
-hl.bind(M .. " + SHIFT + W", hl.dsp.exec_cmd("qs ipc call atelier toggle rotation"))
+hl.bind(M .. " + SHIFT + W", hl.dsp.exec_cmd("qs ipc call aequalyn page rotation"))
 hl.bind(M .. " + CTRL + SHIFT + SPACE", hl.dsp.exec_cmd("qs ipc call atelier toggle themes"))
 hl.bind(M .. " + CTRL + SPACE", hl.dsp.exec_cmd("aequalyn-wallpaper next"))
 hl.bind(M .. " + O",       hl.dsp.exec_cmd("qs ipc call monitors toggle"))
