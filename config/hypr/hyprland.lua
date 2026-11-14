@@ -78,7 +78,7 @@ hl.config({
     },
 })
 
-hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })
+hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace", scale = 1.5 })
 
 ---------------------------------------------------------------------- keybinds
 local M      = "SUPER"

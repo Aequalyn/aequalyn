@@ -41,3 +41,5 @@ hl.config({
         },
     },
 })
+
+hl.animation({ leaf = "workspaces", enabled = true, speed = 6, bezier = "easeOutQuint", style = "slide" })
