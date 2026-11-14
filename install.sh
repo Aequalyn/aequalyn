@@ -14,8 +14,9 @@
 # ISO tree has shell/ and themes/), next to it (../aequalyn-shell,
 # ../aequalyn-themes), and finally cloned from GitHub into the cache.
 #
-# Safe to re-run: user-owned files are never deleted, only overwritten with
-# the shipped defaults. Use --force to also refresh generated colour files.
+# Safe to re-run: what the user changed is kept (settings, layouts, default apps,
+# terminal and GTK preferences, colours, wallpaper and theme), and a copy of it is
+# saved first. --force also refreshes the generated colour files.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -75,6 +76,43 @@ SHELL_SRC=$(resolve_repo aequalyn-shell shell "${AEQUALYN_SHELL_DIR:-}") \
     || { echo "aequalyn-shell not found (set AEQUALYN_SHELL_DIR)" >&2; exit 1; }
 THEMES_SRC=$(resolve_repo aequalyn-themes themes "${AEQUALYN_THEMES_DIR:-}" || true)
 mkdir -p "$TARGET"
+
+# 0. Before an update changes anything, a copy of what the user set: their settings,
+#    layouts, docks, default apps, Hyprland, terminal and GTK configs, wallpaper and
+#    theme choice. In ~/.local/state/aequalyn/backups, the last 5 kept; bring one back
+#    with:  tar -xzf <file> -C ~
+if [[ $SKEL -eq 0 && -f "$TARGET/.config/aequalyn/settings.json" ]]; then
+    _bk="$TARGET/.local/state/aequalyn/backups"
+    mkdir -p "$_bk"
+    _items=()
+    for p in .config/aequalyn .config/mimeapps.list .config/hypr .config/kitty .config/foot \
+             .config/fuzzel .config/qt6ct .config/gtk-3.0 .config/gtk-4.0 \
+             .config/quickshell/wallpaper.conf .config/quickshell/theme.conf \
+             .config/quickshell/theme-switcher/wallpaper-theme.json; do
+        [[ -e "$TARGET/$p" ]] && _items+=("$p")
+    done
+    if tar -C "$TARGET" -czf "$_bk/before-update-$(date +%Y%m%d-%H%M%S).tar.gz" "${_items[@]}" 2>/dev/null; then
+        info "your settings, as they were -> $_bk"
+    fi
+    ls -1t "$_bk"/before-update-*.tar.gz 2>/dev/null | tail -n +6 | xargs -r rm -f
+fi
+
+# Files people change after the first install: settings the shell saves, terminal /
+# launcher / Qt / GTK preferences (mimeapps.list, the default apps, has its own rule below). An update leaves each alone once it differs
+# from what Aequalyn shipped last time (it was changed, by hand or by a setting), and
+# still brings new defaults to one nobody touched. What was shipped is remembered in
+# ~/.local/state/aequalyn/shipped. --force never applies to these.
+USER_FILES=" aequalyn/settings.json aequalyn/layouts.json kitty/kitty.conf foot/foot.ini fuzzel/fuzzel.ini qt6ct/qt6ct.conf gtk-3.0/settings.ini "
+SHIPPED="$TARGET/.local/state/aequalyn/shipped"
+user_file() { # <shipped file> <path under .config>
+    local src=$1 rel=$2 dst="$TARGET/.config/$2" stamp="$SHIPPED/$2"
+    if [[ ! -e "$dst" ]] || { [[ -f "$stamp" ]] && cmp -s "$dst" "$stamp"; }; then
+        mkdir -p "$(dirname "$dst")"
+        cp "$src" "$dst"
+    fi
+    mkdir -p "$(dirname "$stamp")"
+    cp "$src" "$stamp"
+}
 
 # 1. QuickShell config (real copy, not a symlink: /etc/skel must be portable)
 # Preserve the user's current wallpaper/theme selection across updates.
@@ -142,6 +180,7 @@ for dir in hypr kitty foot fuzzel qt6ct gtk-3.0 gtk-4.0 btop matugen aequalyn qu
         for f in "$src"/* "$src"/.[!.]*; do
             [[ -e "$f" ]] || continue
             base=$(basename "$f")
+            if [[ "$USER_FILES" == *" $dir/$base "* ]]; then user_file "$f" "$dir/$base"; continue; fi
             case "$base" in
                 aequalyn-colors.conf|aequalyn-colors.ini|aequalyn.conf|aequalyn.theme|gtk.css|colors.lua|look.lua|workspace-layouts.lua|wallpaper-theme.json|hyprlock.conf)
                     if [[ $FORCE -eq 1 || ! -e "$dst/$base" ]]; then cp -r "$f" "$dst/$base"; fi
@@ -153,7 +192,7 @@ for dir in hypr kitty foot fuzzel qt6ct gtk-3.0 gtk-4.0 btop matugen aequalyn qu
         cp "$src" "$dst"
     fi
 done
-info "config -> $TARGET/.config"
+info "config -> $TARGET/.config (what you changed stays as it is)"
 
 # 2b. Updates leave the user's hyprland.lua alone (above), but Aequalyn's own layout
 #     modules are part of Aequalyn, not something people tune by hand (that's user.lua):
