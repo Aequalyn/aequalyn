@@ -78,9 +78,7 @@ hl.config({
     },
 })
 
--- Keep swipes on the current monitor: move to the next/prev workspace on THIS monitor.
-hl.gesture({ fingers = 3, direction = "left",  action = function() hl.exec_cmd("hyprctl eval 'hl.dispatch(hl.dsp.focus({ workspace = \"m+1\" }))'") end, scale = 1.5 })
-hl.gesture({ fingers = 3, direction = "right", action = function() hl.exec_cmd("hyprctl eval 'hl.dispatch(hl.dsp.focus({ workspace = \"m-1\" }))'") end, scale = 1.5 })
+hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })
 
 ---------------------------------------------------------------------- keybinds
 local M      = "SUPER"
@@ -152,8 +150,8 @@ hl.bind(M .. " + SHIFT + M", hl.dsp.exec_cmd("qs ipc call power toggle"))
 -- Workspaces
 for i = 1, 10 do
     local key = tostring(i % 10)
-    hl.bind(M .. " + " .. key,        hl.dsp.focus({ workspace = "m~" .. i }))
-    hl.bind(M .. " + SHIFT + " .. key,  hl.dsp.window.move({ workspace = "m~" .. i, follow = false }))
+    hl.bind(M .. " + " .. key,        hl.dsp.focus({ workspace = i }))
+    hl.bind(M .. " + SHIFT + " .. key,  hl.dsp.window.move({ workspace = i }))
 end
 hl.bind(M .. " + S",        hl.dsp.workspace.toggle_special("magic"))
 hl.bind(M .. " + SHIFT + S",  hl.dsp.window.move({ workspace = "special:magic" }))
