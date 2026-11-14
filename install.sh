@@ -327,16 +327,18 @@ fi
 
 # 7c. Seed web apps (Reddit, ChatGPT, YouTube Music) unless the installer
 #     asked us not to. The browser chosen at install time becomes the default.
+#     On an update (no browser given) seeding leaves existing web apps and their
+#     browser alone: passing "auto" there would reset the browser the user picked.
 SEED_WEBAPPS="${AEQUALYN_SEED_WEBAPPS:-1}"
-WEBAPP_BROWSER="${AEQUALYN_WEBAPP_BROWSER:-auto}"
+WEBAPP_BROWSER="${AEQUALYN_WEBAPP_BROWSER:-}"
 case "$SEED_WEBAPPS" in
     0|false|False|no|NO) SEED_WEBAPPS=0 ;;
     *) SEED_WEBAPPS=1 ;;
 esac
 if [[ "$SEED_WEBAPPS" -eq 1 && -x "$TARGET/.local/bin/aequalyn-webapp" ]]; then
-    info "seeding web apps (browser: $WEBAPP_BROWSER) ..."
+    info "seeding web apps (browser: ${WEBAPP_BROWSER:-unchanged}) ..."
     HOME="$TARGET" AEQUALYN_ASSETS="$TARGET/.local/share/aequalyn/assets" \
-        "$TARGET/.local/bin/aequalyn-webapp" seed --browser "$WEBAPP_BROWSER" >/dev/null 2>&1 || true
+        "$TARGET/.local/bin/aequalyn-webapp" seed ${WEBAPP_BROWSER:+--browser "$WEBAPP_BROWSER"} >/dev/null 2>&1 || true
 fi
 
 # 8. Ownership (installing into a target home from the live ISO)
