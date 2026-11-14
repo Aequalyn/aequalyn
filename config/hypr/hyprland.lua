@@ -79,8 +79,24 @@ hl.config({
 })
 
 -- Keep swipes on the current monitor: move to the next/prev workspace on THIS monitor.
-hl.gesture({ fingers = 3, direction = "left",  action = function() hl.dispatch(hl.dsp.focus({ workspace = "m+1" })) end, scale = 1.5 })
-hl.gesture({ fingers = 3, direction = "right", action = function() hl.dispatch(hl.dsp.focus({ workspace = "m-1" })) end, scale = 1.5 })
+local swipeAccum = 0
+hl.gesture({
+    fingers = 3,
+    direction = "horizontal",
+    scale = 1.5,
+    action = {
+        start = function(e) swipeAccum = 0 end,
+        update = function(e) swipeAccum = swipeAccum + e.delta.x end,
+        finish = function(e)
+            if e.cancelled then return end
+            if swipeAccum < 0 then
+                hl.dispatch(hl.dsp.focus({ workspace = "m+1" }))
+            elseif swipeAccum > 0 then
+                hl.dispatch(hl.dsp.focus({ workspace = "m-1" }))
+            end
+        end
+    }
+})
 
 ---------------------------------------------------------------------- keybinds
 local M      = "SUPER"
