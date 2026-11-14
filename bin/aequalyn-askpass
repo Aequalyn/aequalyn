@@ -1,0 +1,3 @@
+#!/bin/sh
+# GUI password prompt for sudo, used by the Aequalyn store.
+exec zenity --password --title="Aequalyn" --timeout=120
