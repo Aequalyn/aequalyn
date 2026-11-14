@@ -125,6 +125,18 @@ for dir in hypr kitty foot fuzzel qt6ct gtk-3.0 gtk-4.0 btop matugen aequalyn qu
         cp -rn "$src/." "$dst/"
         continue
     fi
+    # mimeapps.list is user state: default apps are chosen in Settings. Only
+    # install the shipped list on a fresh home (or --force); otherwise just
+    # repair the legacy Nautilus id, so updates never reset the user's choices
+    # (and never make kitty-open, which also claims inode/directory, win again).
+    if [[ "$dir" == mimeapps.list ]]; then
+        if [[ $FORCE -eq 1 || ! -e "$dst" ]]; then
+            cp "$src" "$dst"
+        else
+            sed -i 's|^inode/directory=nautilus\.desktop$|inode/directory=org.gnome.Nautilus.desktop|' "$dst"
+        fi
+        continue
+    fi
     if [[ -d "$src" ]]; then
         mkdir -p "$dst"
         for f in "$src"/* "$src"/.[!.]*; do
