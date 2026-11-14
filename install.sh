@@ -239,9 +239,13 @@ fi
 
 # 3. CLI helpers (only regular files: skip __pycache__ and other stray dirs)
 mkdir -p "$TARGET/.local/bin"
+# each swapped in as a new file (a rename): a command running right now, like the
+# aequalyn-update that called this, keeps reading its own copy
 for _f in "$ROOT/bin/"*; do
     [[ -f "$_f" ]] || continue
-    cp "$_f" "$TARGET/.local/bin/"
+    _n=$(basename "$_f")
+    cp "$_f" "$TARGET/.local/bin/.$_n.new"
+    mv -f "$TARGET/.local/bin/.$_n.new" "$TARGET/.local/bin/$_n"
 done
 chmod 755 "$TARGET/.local/bin/"* 2>/dev/null || true
 info "bin -> $TARGET/.local/bin"
