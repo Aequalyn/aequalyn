@@ -4,7 +4,9 @@
 # from aequalyn-live-login once the Hyprland/Wayland sockets exist. Safe to
 # call twice: qs -n refuses a second instance and every other step is idempotent.
 set -u
-export PATH="$HOME/.local/bin:$PATH"
+# ~/.local/bin first, once: this runs again on every shell restart, with the PATH it
+# left behind
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
 
 # Ensure agent skill folders (.agents, .claude, ...) exist so AI assistants
 # can load Aequalyn's SKILL.md. Idempotent.
