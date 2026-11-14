@@ -79,8 +79,8 @@ hl.config({
 })
 
 -- Keep swipes on the current monitor: move to the next/prev workspace on THIS monitor.
-hl.gesture({ fingers = 3, direction = "left",  action = function() hl.dispatch(hl.dsp.focus({ workspace = "m+1" })) end, scale = 1.5 })
-hl.gesture({ fingers = 3, direction = "right", action = function() hl.dispatch(hl.dsp.focus({ workspace = "m-1" })) end, scale = 1.5 })
+hl.gesture({ fingers = 3, direction = "left",  action = function() hl.exec_cmd("hyprctl eval 'hl.dispatch(hl.dsp.focus({ workspace = \"m+1\" }))'") end, scale = 1.5 })
+hl.gesture({ fingers = 3, direction = "right", action = function() hl.exec_cmd("hyprctl eval 'hl.dispatch(hl.dsp.focus({ workspace = \"m-1\" }))'") end, scale = 1.5 })
 
 ---------------------------------------------------------------------- keybinds
 local M      = "SUPER"
