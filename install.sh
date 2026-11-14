@@ -211,7 +211,7 @@ if [[ $SKEL -eq 1 ]]; then
 Type=Application
 Name=Install Aequalyn
 Comment=Install Aequalyn to this machine
-Exec=kitty -e sudo aequalyn-install
+Exec=sudo aequalyn-install
 Icon=system-software-install
 Terminal=false
 Categories=System;
