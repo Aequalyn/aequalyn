@@ -32,7 +32,9 @@ shell for [Hyprland](https://hyprland.org/), with wallpaper-driven
 - **Screen recorder** — bar plugin and `Super + Shift + R` toggle via
   `bin/aequalyn-record` (`gpu-screen-recorder`), saving to `~/Videos/Aequalyn-*.mp4`.
 - **Screenshots** — bar plugin and keybinds via `bin/aequalyn-screenshot`
-  (`grim`/`slurp`/`wl-copy`), saving files to `~/Pictures/Screenshots/Aequalyn-*.png`.
+  (`grim`/`slurp`/`wl-copy`); every shot is saved to
+  `~/Pictures/Screenshots/Aequalyn-*.png`, and the default shortcuts copy it to
+  the clipboard too.
 - **Snapshots** — `snapper` on Btrfs plus
   [`limine-mkinitcpio-hook`](https://aur.archlinux.org/packages/limine-mkinitcpio-hook)
   and

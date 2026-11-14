@@ -2,13 +2,14 @@
 # aequalyn-screenshot -- capture screenshots via grim/slurp/wl-copy.
 #
 # Usage:
-#   aequalyn-screenshot region-clip   select region and copy to clipboard (default)
-#   aequalyn-screenshot region-file   select region and save to file
-#   aequalyn-screenshot full-clip     capture full screen and copy to clipboard
-#   aequalyn-screenshot full-file     capture full screen and save to file
+#   aequalyn-screenshot region-clip   select region, save it and copy to clipboard (default)
+#   aequalyn-screenshot region-file   select region and save to file only
+#   aequalyn-screenshot full-clip     capture full screen, save it and copy to clipboard
+#   aequalyn-screenshot full-file     capture full screen and save to file only
 #
-# Files are saved to ~/Pictures/Screenshots/Aequalyn-YYYYmmdd-HHMMSS.png
-# The saved path is printed on success for file captures.
+# Every mode saves a PNG to ~/Pictures/Screenshots/Aequalyn-YYYYmmdd-HHMMSS.png;
+# the *-clip modes copy it to the clipboard as well.
+# The saved path is printed on success.
 set -euo pipefail
 export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:$PATH"
 
@@ -57,11 +58,11 @@ save_path() {
 
 case "$cmd" in
     region|region-clip)
-        tmp=$(mktemp /tmp/aequalyn-screenshot.XXXXXX.png)
-        trap 'rm -f "$tmp"' EXIT
-        capture_region "$tmp"
-        copy_file "$tmp"
-        notify "Region copied to clipboard"
+        out=$(save_path)
+        capture_region "$out"
+        copy_file "$out"
+        notify "Saved to $out (copied to clipboard)"
+        echo "$out"
         ;;
     region-file)
         out=$(save_path)
@@ -70,11 +71,11 @@ case "$cmd" in
         echo "$out"
         ;;
     full|full-clip)
-        tmp=$(mktemp /tmp/aequalyn-screenshot.XXXXXX.png)
-        trap 'rm -f "$tmp"' EXIT
-        capture_full "$tmp"
-        copy_file "$tmp"
-        notify "Screen copied to clipboard"
+        out=$(save_path)
+        capture_full "$out"
+        copy_file "$out"
+        notify "Saved to $out (copied to clipboard)"
+        echo "$out"
         ;;
     full-file)
         out=$(save_path)
