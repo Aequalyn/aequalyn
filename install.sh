@@ -247,8 +247,11 @@ chmod 755 "$TARGET/.local/bin/"* 2>/dev/null || true
 info "bin -> $TARGET/.local/bin"
 
 # 4. Wallpaper + first-run state
+# the sample wallpaper only on a first install: one you deleted stays deleted
 mkdir -p "$TARGET/Pictures/Wallpapers"
-cp "$ROOT/assets/beach.jpg" "$TARGET/Pictures/Wallpapers/"
+if [[ $SKEL -eq 1 || -z "$_saved_wp" ]]; then
+    cp -n "$ROOT/assets/beach.jpg" "$TARGET/Pictures/Wallpapers/" 2>/dev/null || true
+fi
 if [[ $SKEL -eq 0 ]]; then
     if [[ -n "$_saved_wp" ]]; then
         printf '%s' "$_saved_wp" > "$TARGET/.config/quickshell/wallpaper.conf"
