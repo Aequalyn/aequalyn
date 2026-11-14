@@ -198,10 +198,13 @@ PY
     info "layouts -> $TARGET/.config/hypr/aequalyn"
 fi
 
-# 3. CLI helpers
+# 3. CLI helpers (only regular files: skip __pycache__ and other stray dirs)
 mkdir -p "$TARGET/.local/bin"
-cp "$ROOT/bin/"* "$TARGET/.local/bin/"
-chmod 755 "$TARGET/.local/bin/"*
+for _f in "$ROOT/bin/"*; do
+    [[ -f "$_f" ]] || continue
+    cp "$_f" "$TARGET/.local/bin/"
+done
+chmod 755 "$TARGET/.local/bin/"* 2>/dev/null || true
 info "bin -> $TARGET/.local/bin"
 
 # 4. Wallpaper + first-run state
