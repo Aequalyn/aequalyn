@@ -75,6 +75,8 @@ fi
 if [[ -x $CAL ]]; then
     info "calibrating the boot progress bar to this machine"
     "$CAL" --theme-dir "$THEME_DIR" || warn "calibration failed; keeping the theme default"
+    # keep the helper around so the bar can be recalibrated later
+    install -m 755 "$CAL" /usr/local/bin/aequalyn-plymouth-calibrate 2>/dev/null || true
 else
     warn "calibration helper not found; keeping the theme default"
 fi
