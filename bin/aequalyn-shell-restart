@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# aequalyn-shell-restart -- Restart the Aequalyn QuickShell desktop.
+set -Eeuo pipefail
+
+QS_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/quickshell"
+
+if ! command -v qs >/dev/null 2>&1; then
+    echo "aequalyn-shell-restart: qs was not found in PATH" >&2
+    exit 127
+fi
+
+if [[ ! -d "$QS_CONFIG" ]]; then
+    echo "aequalyn-shell-restart: $QS_CONFIG was not found" >&2
+    exit 1
+fi
+
+if pgrep -x qs >/dev/null 2>&1; then
+    pkill -x qs 2>/dev/null || true
+    for _ in $(seq 1 25); do
+        pgrep -x qs >/dev/null 2>&1 || break
+        sleep 0.2
+    done
+    if pgrep -x qs >/dev/null 2>&1; then
+        echo "aequalyn-shell-restart: qs did not stop" >&2
+        exit 1
+    fi
+fi
+
+qs -n -d -p "$QS_CONFIG"
