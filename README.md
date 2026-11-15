@@ -144,6 +144,20 @@ a config, the user sees it as a list of differences and approves or edits it,
 and `aequalyn-install --config install.toml` applies it identically every time.
 Everything works without AI.
 
+## AI and development tools
+
+**Settings → AI tools** can install, update and remove Claude Code, Codex CLI,
+GitHub Copilot CLI and Gemini CLI for the current user. They are installed from
+their publishers' npm packages under `~/.local/share/aequalyn/ai-tools`; their
+commands are linked into `~/.local/bin`. Node.js and npm are required. Agent
+sign-in and configuration stay with each provider.
+
+The same manager is available in a terminal as `aequalyn-ai-tool list`,
+`aequalyn-ai-tool install codex`, `aequalyn-ai-tool update codex`, and
+`aequalyn-ai-tool remove codex`. Removing a tool leaves its settings and
+sign-in data in place. The optional Developer profile includes programming
+languages, mise, npm and uv; the Store can add packages to an existing system.
+
 ## Keybinds
 
 | Key | Action |
