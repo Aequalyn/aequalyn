@@ -164,7 +164,7 @@ languages, mise, npm and uv; the Store can add packages to an existing system.
 | --- | --- |
 | `Super + Return` | Terminal |
 | `Super + D` | App launcher |
-| `Super + Space` | Applications (as `Super + D`) |
+| `Super + Space` | Programs menu: browse applications and CLI tools by category |
 | `Super + ,` / gear in bar | Aequalyn settings |
 | `apps-menu` Arch logo in bar | App launcher |
 | `Super + T` / `Super + Ctrl + Shift + Space` | Atelier: themes |
