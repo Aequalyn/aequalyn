@@ -150,7 +150,7 @@ Everything works without AI.
 | --- | --- |
 | `Super + Return` | Terminal |
 | `Super + D` | App launcher |
-| `Super + Space` | Fuzzel |
+| `Super + Space` | Applications (as `Super + D`) |
 | `Super + ,` / gear in bar | Aequalyn settings |
 | `apps-menu` Arch logo in bar | App launcher |
 | `Super + T` / `Super + Ctrl + Shift + Space` | Atelier: themes |
