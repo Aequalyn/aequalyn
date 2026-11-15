@@ -4,7 +4,9 @@
 # Usage:
 #   aequalyn-themes list [--json]          every installed folder theme
 #   aequalyn-themes current                id of the active folder theme (if any)
-#   aequalyn-themes set <id> [--from-shell] activate a theme: palette + background
+#   aequalyn-themes set <id> [--from-shell] [--no-background]
+#                                          activate a theme: palette + background
+#                                          (--no-background: its colours only)
 #   aequalyn-themes clear                  forget the active folder theme
 #   aequalyn-themes backgrounds [id]       background images of a theme
 #   aequalyn-themes install <git-url|dir>  add a theme to ~/.config/aequalyn/themes
@@ -119,9 +121,14 @@ cmd_current() {
 }
 
 cmd_set() {
-    local id=${1:-} from_shell=0 dir first
-    [[ -n "$id" ]] || die "usage: set <id>"
-    [[ "${2:-}" == "--from-shell" ]] && from_shell=1
+    local id=${1:-} from_shell=0 no_bg=0 dir first a
+    [[ -n "$id" ]] || die "usage: set <id> [--from-shell] [--no-background]"
+    for a in "${@:2}"; do
+        case "$a" in
+            --from-shell) from_shell=1 ;;
+            --no-background) no_bg=1 ;;
+        esac
+    done
     dir=$(find_theme "$id") || die "no such theme: $id"
     mkdir -p "$(dirname "$CURRENT")"
     ln -sfn "$dir" "$CURRENT"
@@ -145,7 +152,7 @@ cmd_set() {
     # Background: keep the current one if it already belongs to this theme
     # (re-selecting a theme should not reshuffle), otherwise the first one.
     first=$(backgrounds_of "$dir" | head -n1)
-    if [[ -n "$first" ]] && command -v aequalyn-wallpaper >/dev/null 2>&1; then
+    if [[ $no_bg -eq 0 && -n "$first" ]] && command -v aequalyn-wallpaper >/dev/null 2>&1; then
         local cur
         cur=$(cat "$CONF/quickshell/wallpaper.conf" 2>/dev/null || true)
         if [[ "$cur" != "$dir/backgrounds/"* ]]; then
