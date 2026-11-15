@@ -24,7 +24,20 @@ mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 # 1. Desktop services (Polkit, portals, keyring)
 if command -v systemctl >/dev/null 2>&1; then
-    systemctl --user start hyprpolkitagent.service           >/dev/null 2>&1 || true
+    # hyprpolkitagent SIGSEGVs on some GPUs (notably virtio-gpu VMs) when it
+    # renders its password dialog, which breaks pkexec completely. Prefer
+    # polkit-gnome's GTK agent, which renders fine there; fall back to
+    # hyprpolkitagent only when polkit-gnome is not installed.
+    POLKIT_AGENT=/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
+    if [[ -x "$POLKIT_AGENT" ]]; then
+        systemctl --user stop hyprpolkitagent.service >/dev/null 2>&1 || true
+        if ! pgrep -f "^$POLKIT_AGENT$" >/dev/null 2>&1; then
+            setsid "$POLKIT_AGENT" >/dev/null 2>&1 &
+            log "started polkit-gnome authentication agent"
+        fi
+    else
+        systemctl --user start hyprpolkitagent.service >/dev/null 2>&1 || true
+    fi
     systemctl --user start xdg-desktop-portal-hyprland.service >/dev/null 2>&1 || true
     systemctl --user start xdg-desktop-portal-gtk.service     >/dev/null 2>&1 || true
 fi
