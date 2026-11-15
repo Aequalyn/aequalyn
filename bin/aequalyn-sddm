@@ -46,7 +46,7 @@ case "$cmd" in
         find "$LOCKSCREENS_DIR" -type f \( -name "*.ttf" -o -name "*.otf" \) -exec cp -n {} /usr/share/fonts/qylock/ \; 2>/dev/null || true
         fc-cache -f 2>/dev/null || true
         mkdir -p /usr/share/aequalyn
-        touch /usr/share/aequalyn/lockscreens.enabled
+        printf '1\n' > /usr/share/aequalyn/lockscreens.enabled
         echo "installed"
         ;;
     list)
