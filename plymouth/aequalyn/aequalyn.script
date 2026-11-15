@@ -14,6 +14,11 @@ SPINNER_STEP = 0.25;     # degrees per frame -> one full turn every ~29 s
 # creeping instead of parking at full, and it is snapped full on quit.
 BOOT_SECONDS = 4.6;
 
+# Live media has no passphrase to unlock, so there is no submit to start the
+# bar from. The ISO build switches this to 1 and the bar runs with the splash;
+# installs keep 0 and start counting when the passphrase is answered.
+START_BAR_ON_SPLASH = 0;
+
 # ---- Background ---------------------------------------------------------------
 Window.SetBackgroundTopColor(0.0784, 0.1647, 0.1882);
 Window.SetBackgroundBottomColor(0.0784, 0.1647, 0.1882);
@@ -78,7 +83,7 @@ fail_active = 0;
 submit_seen = 0;      # a password was submitted and the theme went back to normal
 retry = 0;            # the current prompt is a retry, i.e. the last password was wrong
 prev_bullets = 0;
-post_submit = 0;          # a password was answered; the boot bar is running
+post_submit = START_BAR_ON_SPLASH;   # the boot bar is running
 post_submit_frames = 0;   # frames since that answer
 progress_px = 0;
 mode = Plymouth.GetMode();
