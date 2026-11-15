@@ -1,0 +1,11 @@
+[Plymouth Theme]
+Name=Aequalyn
+Description=Aequalyn boot splash: animated mark, circular loader, LUKS password dialog.
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/aequalyn
+ScriptFile=/usr/share/plymouth/themes/aequalyn/aequalyn.script
+ConsoleLogBackgroundColor=0x142a30
+
+[script-env-vars]

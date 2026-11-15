@@ -1,0 +1,274 @@
+# Aequalyn Plymouth theme
+# Animated mark + circular loader + LUKS password dialog + retry/failure + scaling.
+
+# ---- Background ---------------------------------------------------------------
+Window.SetBackgroundTopColor(0.0784, 0.1647, 0.1882);
+Window.SetBackgroundBottomColor(0.0784, 0.1647, 0.1882);
+
+# ---- Scaling -----------------------------------------------------------------
+screen_w = Window.GetWidth();
+screen_h = Window.GetHeight();
+scale = Math.Min(screen_w, screen_h) / 1080.0;
+if (scale < 0.55) scale = 0.55;
+if (scale > 2.5) scale = 2.5;
+
+# ---- Load base images --------------------------------------------------------
+logo_base = Image("logo.png");
+ring_track_base = Image("track.png");
+ring_spinner_base = Image("spinner.png");
+box_base = Image("box.png");
+lock_base = Image("lock.png");
+entry_base = Image("entry.png");
+bullet_base = Image("bullet.png");
+pbox_base = Image("progress_box.png");
+pbar_base = Image("progress_bar.png");
+
+# ---- Scale images ------------------------------------------------------------
+logo_size = Math.Int(180 * scale);
+logo_img = logo_base.Scale(logo_size, logo_size);
+
+ring_size = Math.Int(230 * scale);
+ring_track_img = ring_track_base.Scale(ring_size, ring_size);
+ring_spinner_img = ring_spinner_base.Scale(ring_size, ring_size);
+
+box_w = Math.Int(box_base.GetWidth() * scale);
+box_h = Math.Int(box_base.GetHeight() * scale);
+box_img = box_base.Scale(box_w, box_h);
+
+lock_w = Math.Int(lock_base.GetWidth() * scale);
+lock_h = Math.Int(lock_base.GetHeight() * scale);
+lock_img = lock_base.Scale(lock_w, lock_h);
+
+entry_w = Math.Int(entry_base.GetWidth() * scale);
+entry_h = Math.Int(entry_base.GetHeight() * scale);
+entry_img = entry_base.Scale(entry_w, entry_h);
+
+bullet_w = Math.Int(bullet_base.GetWidth() * scale);
+bullet_h = Math.Int(bullet_base.GetHeight() * scale);
+bullet_img = bullet_base.Scale(bullet_w, bullet_h);
+
+pbox_w = Math.Int(pbox_base.GetWidth() * scale);
+pbox_h = Math.Int(pbox_base.GetHeight() * scale);
+pbox_img = pbox_base.Scale(pbox_w, pbox_h);
+
+pbar_h = Math.Int(pbar_base.GetHeight() * scale);
+pbar_base_scaled = pbar_base.Scale(Math.Int(pbar_base.GetWidth() * scale), pbar_h);
+
+# ---- State -------------------------------------------------------------------
+status = "normal";
+spinner_angle = 0;
+logo_opacity_angle = 0;
+fail_timer = 0;
+fail_active = 0;
+prev_bullets = 0;
+mode = Plymouth.GetMode();
+
+# ---- Sprites -----------------------------------------------------------------
+logo_sprite = Sprite(logo_img);
+logo_sprite.SetOpacity(1);
+
+ring_track_sprite = Sprite(ring_track_img);
+ring_spinner_sprite = Sprite(ring_spinner_img);
+
+# positions
+cx = Window.GetX() + screen_w / 2;
+cy = Window.GetY() + screen_h / 2;
+
+logo_sprite.SetPosition(cx - logo_size / 2, cy - logo_size / 2, 5);
+ring_track_sprite.SetPosition(cx - ring_size / 2, cy - ring_size / 2, 4);
+ring_spinner_sprite.SetPosition(cx - ring_size / 2, cy - ring_size / 2, 6);
+
+# dialog (lazy)
+dialog = 0;
+dialog_box = 0;
+dialog_lock = 0;
+dialog_entry = 0;
+dialog_bullets = [];
+dialog_visible = 0;
+
+fun dialog_setup() {
+    if (dialog == 1) return;
+    db = Sprite(box_img);
+    dl = Sprite(lock_img);
+    de = Sprite(entry_img);
+
+    dbx = cx - box_w / 2;
+    dby = cy + Math.Int(60 * scale);
+    db.SetPosition(dbx, dby, 10000);
+
+    dlx = dbx + Math.Int(20 * scale);
+    dly = dby + box_h / 2 - lock_h / 2;
+    dl.SetPosition(dlx, dly, 10001);
+
+    dex = dlx + lock_w + Math.Int(12 * scale);
+    dey = dby + box_h / 2 - entry_h / 2;
+    de.SetPosition(dex, dey, 10001);
+
+    global.dialog_box = db;
+    global.dialog_lock = dl;
+    global.dialog_entry = de;
+    global.dialog = 1;
+    global.dialog_bullets = [];
+}
+
+fun dialog_opacity(op) {
+    if (dialog == 0) return;
+    dialog_box.SetOpacity(op);
+    dialog_lock.SetOpacity(op);
+    dialog_entry.SetOpacity(op);
+    for (i = 0; dialog_bullets[i]; i++) {
+        dialog_bullets[i].sprite.SetOpacity(op);
+    }
+}
+
+fun display_normal_callback() {
+    global.status = "normal";
+    if (dialog == 1) dialog_opacity(0);
+    global.dialog_visible = 0;
+}
+
+fun display_password_callback(prompt, bullets) {
+    previously = (global.status == "password");
+    global.status = "password";
+    if (dialog == 0) dialog_setup();
+    else dialog_opacity(1);
+    global.dialog_visible = 1;
+
+    if (previously == 1 && bullets == 0 && global.prev_bullets > 0) {
+        global.fail_active = 1;
+        global.fail_timer = 40;
+    }
+    global.prev_bullets = bullets;
+
+    # update bullets
+    for (index = 0; dialog_bullets[index] || index < bullets; index++) {
+        if (!dialog_bullets[index]) {
+            bs = Sprite(bullet_img);
+            bsx = dialog_entry.GetX() + index * (bullet_w + Math.Int(4 * scale));
+            bsy = dialog_entry.GetY() + entry_h / 2 - bullet_h / 2;
+            bs.SetPosition(bsx, bsy, 10002);
+            dialog_bullets[index].sprite = bs;
+            dialog_bullets[index].x = bsx;
+            dialog_bullets[index].y = bsy;
+        }
+        if (index < bullets) dialog_bullets[index].sprite.SetOpacity(1);
+        else dialog_bullets[index].sprite.SetOpacity(0);
+    }
+
+    # shake on retry if fail_active
+    if (fail_active == 1) {
+        fail_timer = 30;
+    }
+}
+
+fun display_message_callback(text) {
+    # show message as label near bottom
+    msg_img = Image.Text(text, 1, 1, 1, 1, "Sans 12");
+    msg_sprite = Sprite(msg_img);
+    msg_sprite.SetPosition(cx - msg_img.GetWidth()/2, cy + Math.Int(180*scale), 10003);
+    global.message_sprite = msg_sprite;
+}
+
+fun hide_message_callback(text) {
+    if (global.message_sprite) global.message_sprite.SetOpacity(0);
+}
+
+Plymouth.SetDisplayNormalFunction(display_normal_callback);
+Plymouth.SetDisplayPasswordFunction(display_password_callback);
+Plymouth.SetDisplayMessageFunction(display_message_callback);
+Plymouth.SetHideMessageFunction(hide_message_callback);
+
+# ---- Progress bar (updates) --------------------------------------------------
+pbox_sprite = Sprite(pbox_img);
+pbar_sprite = Sprite();
+pbox_sprite.SetOpacity(0);
+pbar_sprite.SetOpacity(0);
+
+pbox_x = cx - pbox_w / 2;
+pbox_y = cy + Math.Int(120 * scale);
+pbox_sprite.SetPosition(pbox_x, pbox_y, 10);
+
+fun progress_callback(duration, progress) {
+    if (pbar_img.GetWidth() != Math.Int(pbar_base_scaled.GetWidth() * progress)) {
+        pw = Math.Int(pbar_base_scaled.GetWidth() * progress);
+        if (pw < 1) pw = 1;
+        pbar_img = pbar_base_scaled.Scale(pw, pbar_h);
+        pbar_sprite.SetImage(pbar_img);
+    }
+    pbox_sprite.SetOpacity(1);
+    pbar_sprite.SetOpacity(1);
+    pbx = cx - pbar_base_scaled.GetWidth() / 2;
+    pby = pbox_y + (pbox_h - pbar_h) / 2;
+    pbar_sprite.SetPosition(pbx, pby, 11);
+}
+
+Plymouth.SetBootProgressFunction(progress_callback);
+
+# ---- Quit --------------------------------------------------------------------
+fun quit_callback() {
+    logo_sprite.SetOpacity(0);
+    ring_track_sprite.SetOpacity(0);
+    ring_spinner_sprite.SetOpacity(0);
+    if (dialog == 1) dialog_opacity(0);
+}
+Plymouth.SetQuitFunction(quit_callback);
+
+# ---- Refresh -----------------------------------------------------------------
+fun refresh_callback() {
+    global.spinner_angle += 4;
+    if (global.spinner_angle >= 360) global.spinner_angle = 0;
+
+    # rotate spinner
+    rotated = ring_spinner_img.Rotate(global.spinner_angle);
+    ring_spinner_sprite.SetImage(rotated);
+
+    # logo pulse in normal mode
+    if (status == "normal") {
+        logo_opacity_angle += (2 * Math.Pi / 50) * 0.4;
+        op = (Math.Cos(logo_opacity_angle) + 1) / 2;
+        op = op * 0.4 + 0.6;
+        logo_sprite.SetOpacity(op);
+        # center
+        logo_sprite.SetPosition(cx - logo_size / 2, cy - logo_size / 2, 5);
+        ring_track_sprite.SetPosition(cx - ring_size / 2, cy - ring_size / 2, 4);
+        ring_spinner_sprite.SetPosition(cx - ring_size / 2, cy - ring_size / 2, 6);
+        ring_track_sprite.SetOpacity(0.5);
+        ring_spinner_sprite.SetOpacity(0.9);
+    } else {
+        logo_sprite.SetOpacity(1);
+        logo_sprite.SetPosition(cx - logo_size / 2, cy - logo_size / 2, 5);
+        ring_track_sprite.SetOpacity(0.2);
+        ring_spinner_sprite.SetOpacity(0.6);
+    }
+
+    # dialog shake on failure
+    if (fail_active == 1 && dialog == 1 && dialog_visible == 1) {
+        if (fail_timer > 0) {
+            shake = Math.Sin(fail_timer * 1.2) * 8 * scale;
+            dialog_box.SetPosition(cx - box_w / 2 + shake, cy + Math.Int(60*scale), 10000);
+            # lock/entry follow
+            dialog_lock.SetPosition(cx - box_w/2 + Math.Int(20*scale) + shake, cy + Math.Int(60*scale) + box_h/2 - lock_h/2, 10001);
+            dialog_entry.SetPosition(cx - box_w/2 + Math.Int(20*scale) + lock_w + Math.Int(12*scale) + shake, cy + Math.Int(60*scale) + box_h/2 - entry_h/2, 10001);
+            fail_timer -= 1;
+        } else {
+            fail_active = 0;
+prev_bullets = 0;
+            # reset positions
+            dialog_box.SetPosition(cx - box_w / 2, cy + Math.Int(60*scale), 10000);
+            dialog_lock.SetPosition(cx - box_w/2 + Math.Int(20*scale), cy + Math.Int(60*scale) + box_h/2 - lock_h/2, 10001);
+            dialog_entry.SetPosition(cx - box_w/2 + Math.Int(20*scale) + lock_w + Math.Int(12*scale), cy + Math.Int(60*scale) + box_h/2 - entry_h/2, 10001);
+        }
+    }
+
+    # shutdown/reboot: fade logo out slowly
+    if (mode == "shutdown" || mode == "reboot") {
+        # reduce spinner, pulse logo
+        ring_spinner_sprite.SetOpacity(0.3);
+    }
+}
+
+Plymouth.SetRefreshFunction(refresh_callback);
+
+# initial opacity for track/spinner
+ring_track_sprite.SetOpacity(0.5);
+ring_spinner_sprite.SetOpacity(0.9);
