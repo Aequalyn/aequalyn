@@ -70,7 +70,7 @@ ok "Aequalyn Plymouth theme applied"
 # the LUKS key derivation, which varies per machine. Measure it here.
 CAL="$WORK/bin/aequalyn-plymouth-calibrate"
 if [[ ! -x $CAL ]]; then
-    CAL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/aequalyn-plymouth-calibrate"
+    CAL="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" && pwd)/aequalyn-plymouth-calibrate"
 fi
 if [[ -x $CAL ]]; then
     info "calibrating the boot progress bar to this machine"
@@ -141,9 +141,11 @@ rm -rf "$WORK"
 echo
 ok "Plymouth migration 20261509-1 complete"
 echo
-read -r -p "Reboot now to see the new boot splash? [y/N] " ans
-if [[ "$ans" =~ ^[Yy] ]]; then
-    reboot
-else
-    info "reboot later with: sudo reboot"
+if [[ -t 0 ]]; then
+    read -r -p "Reboot now to see the new boot splash? [y/N] " ans || ans=""
+    if [[ "$ans" =~ ^[Yy] ]]; then
+        reboot
+        exit 0
+    fi
 fi
+info "reboot later with: sudo reboot"
