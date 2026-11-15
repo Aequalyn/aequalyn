@@ -116,7 +116,7 @@ local browser = _xdg_default("text/html", "chromium")
 hl.bind(M .. " + RETURN",  hl.dsp.exec_cmd(term))
 hl.bind(M .. " + E",       hl.dsp.exec_cmd(files))
 hl.bind(M .. " + B",       hl.dsp.exec_cmd(browser))
-hl.bind(M .. " + SPACE",   hl.dsp.exec_cmd("qs ipc call launcher toggle"))   -- Applications, as Super + D
+hl.bind(M .. " + SPACE",   hl.dsp.exec_cmd("qs ipc call programs toggle"))  -- Programs menu
 hl.bind(M .. " + D",       hl.dsp.exec_cmd("qs ipc call launcher toggle"))
 hl.bind(M .. " + COMMA",   hl.dsp.exec_cmd("qs ipc call aequalyn settings"))
 -- Window layouts: Super + L steps through them, the control center shows them all
