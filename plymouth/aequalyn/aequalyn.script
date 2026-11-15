@@ -8,7 +8,10 @@ SPINNER_STEP = 0.25;     # degrees per frame -> one full turn every ~29 s
 
 # Time from pressing Enter in the LUKS dialog until Plymouth hands the screen
 # over to the display manager: key derivation + dm-crypt setup + mount +
-# switch-root + userspace up to plymouth-quit. Tune this to the machine.
+# switch-root + userspace up to plymouth-quit.
+# Written per machine by bin/aequalyn-plymouth-calibrate (runs during the
+# Plymouth migration); on hardware slower than this estimate the bar keeps
+# creeping instead of parking at full, and it is snapped full on quit.
 BOOT_SECONDS = 4.6;
 
 # ---- Background ---------------------------------------------------------------
@@ -283,14 +286,21 @@ fun refresh_callback() {
         ring_spinner_sprite.SetOpacity(0.6);
     }
 
-    # boot bar: starts on the password answer and fills over BOOT_SECONDS
+    # boot bar: starts on the password answer and fills over BOOT_SECONDS.
+    # Up to the estimate it is linear; past it the slope decays so a slower
+    # machine still sees movement instead of a bar stuck at 100%. The quit
+    # callback snaps it full, so it never reaches the end on its own.
     if (global.status == "password") {
         pbar_sprite.SetOpacity(0);
         pbox_sprite.SetOpacity(0);
     } else if (global.post_submit == 1) {
         global.post_submit_frames += 1;
-        p = global.post_submit_frames / (BOOT_SECONDS * REFRESH_HZ);
-        if (p > 1) p = 1;
+        u = global.post_submit_frames / (BOOT_SECONDS * REFRESH_HZ);
+        if (u <= 1) {
+            p = 0.85 * u;
+        } else {
+            p = 0.85 + 0.15 * (1 - 1 / (1 + 5.6667 * (u - 1)));
+        }
         pw = Math.Int(pbar_base_scaled.GetWidth() * p);
         if (pw < 1) pw = 1;
         if (pw != global.progress_px) {

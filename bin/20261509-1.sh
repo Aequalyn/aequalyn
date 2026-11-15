@@ -65,6 +65,20 @@ cp -r "$THEME_SRC/." "$THEME_DIR/"
 plymouth-set-default-theme "$THEME_NAME" >/dev/null 2>&1 || true
 ok "Aequalyn Plymouth theme applied"
 
+# ------------------------------------------------ 2b. progress-bar timing ----
+# The bar fills over BOOT_SECONDS from the passphrase answer; most of that is
+# the LUKS key derivation, which varies per machine. Measure it here.
+CAL="$WORK/bin/aequalyn-plymouth-calibrate"
+if [[ ! -x $CAL ]]; then
+    CAL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/aequalyn-plymouth-calibrate"
+fi
+if [[ -x $CAL ]]; then
+    info "calibrating the boot progress bar to this machine"
+    "$CAL" --theme-dir "$THEME_DIR" || warn "calibration failed; keeping the theme default"
+else
+    warn "calibration helper not found; keeping the theme default"
+fi
+
 # -------------------------------------------------------------- 3. hooks -------
 info "checking mkinitcpio HOOKS"
 CONF=/etc/mkinitcpio.conf
