@@ -8,7 +8,12 @@ hides the browser chrome, which is the closest equivalent.
 
 Usage:
   aequalyn-webapp list [--json]
-  aequalyn-webapp add --name NAME --url URL [--icon REF] [--key KEY]
+  aequalyn-webapp add --name NAME --url URL [--icon REF] [--key KEY] [--category CAT]
+  aequalyn-webapp set-category SLUG|NAME CAT     (CAT "" or "none": no category)
+  aequalyn-webapp categories [--json]
+  aequalyn-webapp category-add LABEL
+  aequalyn-webapp category-rename ID LABEL
+  aequalyn-webapp category-remove ID              (its web apps keep no category)
   aequalyn-webapp remove (--slug SLUG | --name NAME)
   aequalyn-webapp launch SLUG|NAME
   aequalyn-webapp browsers [--json]
@@ -23,9 +28,15 @@ State lives in ~/.config/aequalyn/webapps.json:
     "browser": "auto",            # auto | chromium | google-chrome | firefox | ...
     "apps": [
       {"name": "Reddit", "slug": "reddit", "url": "https://www.reddit.com/",
-       "key": "D", "icon": "aequalyn-webapp-reddit"}
+       "key": "D", "icon": "aequalyn-webapp-reddit", "category": "social"}
     ]
   }
+
+"categories" is the user's own list, [{"id": "chat", "label": "Chat"}, ...]; while it
+is not in the file, it is BUILTIN_CATEGORIES. An app's "category" is an id from it, or
+absent. It goes into the desktop entry's Keywords (and, for the built-in ones, its
+Categories), so the launcher finds the app by it, and the control center filters web
+apps by it.
 
 `sync` writes ~/.local/share/applications/aequalyn-webapp-<slug>.desktop,
 copies/generates icons and rewrites ~/.config/hypr/webapps.lua (one keybind
@@ -71,22 +82,103 @@ GENERIC_ICON = "applications-internet"
 RESERVED_KEYS = set("ACLMNORSWV")
 FREE_KEYS = "BDEFGHIJKPQTUXYZ"
 
+# The categories a web app starts with: (id, label, extra desktop Categories). Every web
+# app keeps Network;WebBrowser; the extra ones come after. The user's own list (in
+# webapps.json) can add, rename and remove categories; ids never change, so a renamed
+# built-in one keeps its desktop Categories.
+BUILTIN_CATEGORIES = [
+    ("chat",        "Chat",        "Chat;InstantMessaging;"),
+    ("mail",        "Mail",        "Email;"),
+    ("social",      "Social",      ""),
+    ("video",       "Video",       "AudioVideo;Video;"),
+    ("music",       "Music",       "AudioVideo;Audio;Music;"),
+    ("ai",          "AI",          "Utility;"),
+    ("development", "Development", "Development;"),
+    ("office",      "Office",      "Office;"),
+    ("news",        "News",        "News;"),
+    ("shopping",    "Shopping",    ""),
+    ("games",       "Games",       "Game;"),
+    ("other",       "Other",       ""),
+]
+DESKTOP_CATEGORIES = {cid: extra for cid, _, extra in BUILTIN_CATEGORIES}
+
+
+def categories(cfg: dict) -> list:
+    """The user's categories, [{"id", "label"}], in their order."""
+    raw = cfg.get("categories")
+    if not isinstance(raw, list):
+        return [{"id": cid, "label": label} for cid, label, _ in BUILTIN_CATEGORIES]
+    out, seen = [], set()
+    for c in raw:
+        if not isinstance(c, dict):
+            continue
+        cid, label = c.get("id"), c.get("label")
+        if not isinstance(cid, str) or not isinstance(label, str):
+            continue
+        if not re.fullmatch(r"[a-z0-9-]{1,40}", cid) or cid in seen or not label.strip():
+            continue
+        out.append({"id": cid, "label": label.strip()})
+        seen.add(cid)
+    return out
+
+
+def category_label(cfg: dict, cid: str) -> str:
+    for c in categories(cfg):
+        if c["id"] == cid:
+            return c["label"]
+    return ""
+
+
+def validate_category_label(label: str) -> str:
+    label = (label or "").strip()
+    if not label:
+        die("a category needs a name")
+    if len(label) > 32:
+        die("a category name is at most 32 characters")
+    if any(ord(ch) < 32 for ch in label) or ";" in label:
+        die("a category name cannot hold control characters or ';'")
+    return label
+
+
+def clean_category(cfg: dict, value: str) -> str:
+    """A category id from the user's list (by id or name), "" for none."""
+    v = (value or "").strip().lower()
+    if v in ("", "none"):
+        return ""
+    cats = categories(cfg)
+    for c in cats:
+        if v == c["id"] or v == c["label"].lower():
+            return c["id"]
+    die("unknown category: %s (one of: %s)" % (value, ", ".join(c["label"] for c in cats) or "none yet"))
+
+
+def category_of(app: dict, cfg: dict) -> str:
+    c = str(app.get("category") or "")
+    return c if category_label(cfg, c) else ""
+
+
 DEFAULT_APPS = [
     {"name": "Reddit", "slug": "reddit", "url": "https://www.reddit.com/",
-     "key": "D", "icon": "aequalyn-webapp-reddit"},
+     "key": "D", "icon": "aequalyn-webapp-reddit",
+     "category": "social"},
     {"name": "ChatGPT", "slug": "chatgpt", "url": "https://chatgpt.com/",
-     "key": "G", "icon": "aequalyn-webapp-chatgpt"},
+     "key": "G", "icon": "aequalyn-webapp-chatgpt",
+     "category": "ai"},
     {"name": "YouTube", "slug": "youtube", "url": "https://www.youtube.com/",
-     "key": "T", "icon": "aequalyn-webapp-youtube"},
+     "key": "T", "icon": "aequalyn-webapp-youtube",
+     "category": "video"},
     {"name": "YouTube Music", "slug": "youtube-music",
      "url": "https://music.youtube.com/", "key": "Y",
-     "icon": "aequalyn-webapp-youtube-music"},
+     "icon": "aequalyn-webapp-youtube-music", "category": "music"},
     {"name": "WhatsApp", "slug": "whatsapp", "url": "https://web.whatsapp.com/",
-     "key": "H", "icon": "aequalyn-webapp-whatsapp"},
+     "key": "H", "icon": "aequalyn-webapp-whatsapp",
+     "category": "chat"},
     {"name": "Gmail", "slug": "gmail", "url": "https://mail.google.com/",
-     "key": "E", "icon": "aequalyn-webapp-gmail"},
+     "key": "E", "icon": "aequalyn-webapp-gmail",
+     "category": "mail"},
     {"name": "GitHub", "slug": "github", "url": "https://github.com/",
-     "key": "B", "icon": "aequalyn-webapp-github"},
+     "key": "B", "icon": "aequalyn-webapp-github",
+     "category": "development"},
 ]
 
 # id -> (label, kind, binary, desktop id)
@@ -665,7 +757,7 @@ def desktop_path(app: dict) -> Path:
     return DESKTOP_DIR / f"{DESKTOP_PREFIX}{app['slug']}.desktop"
 
 
-def write_desktop(app: dict, browser: str):
+def write_desktop(app: dict, browser: str, cfg: dict):
     # Chromium's app windows get a URL-derived class; Firefox honours --class.
     if BROWSERS[browser][1] == "chromium":
         classes = chromium_app_class(app, browser)
@@ -680,12 +772,14 @@ def write_desktop(app: dict, browser: str):
         f"Exec=aequalyn-webapp launch {app['slug']}",
         f"Icon={desktop_string(app.get('icon') or GENERIC_ICON)}",
         "Terminal=false",
-        "Categories=Network;WebBrowser;",
+        "Categories=Network;WebBrowser;" + DESKTOP_CATEGORIES.get(category_of(app, cfg), ""),
         "StartupNotify=true",
     ]
     if classes:
         lines.append(f"StartupWMClass={desktop_string(classes)}")
-    lines.append("Keywords=webapp;web app;")
+    cat = category_of(app, cfg)
+    lines.append("Keywords=webapp;web app;"
+                 + (desktop_string(category_label(cfg, cat).lower()) + ";" if cat else ""))
     DESKTOP_DIR.mkdir(parents=True, exist_ok=True)
     atomic_write(desktop_path(app), "\n".join(lines) + "\n", mode=0o755)
 
@@ -735,7 +829,7 @@ def sync(cfg: dict):
             if new_icon and new_icon != app.get("icon"):
                 app["icon"] = new_icon
                 changed = True
-        write_desktop(app, browser)
+        write_desktop(app, browser, cfg)
         wanted.add(desktop_path(app).name)
     save_config(cfg)
     # Drop launchers for apps that are no longer in the config.
@@ -761,6 +855,8 @@ def cmd_list(args) -> int:
         "resolved": resolved,
         "resolvedLabel": browser_label(resolved),
         "browsers": browser_options(cfg),
+        "categories": [dict(c, count=sum(1 for a in cfg.get("apps", []) if category_of(a, cfg) == c["id"]))
+                       for c in categories(cfg)],
         "apps": [],
     }
     for app in cfg.get("apps", []):
@@ -773,6 +869,8 @@ def cmd_list(args) -> int:
             "shortcut": shortcut(key),
             "icon": app.get("icon") or GENERIC_ICON,
             "iconFile": icon_file(app.get("icon") or ""),
+            "category": category_of(app, cfg),
+            "categoryLabel": category_label(cfg, category_of(app, cfg)),
         })
     if "--json" in args or not sys.stdout.isatty():
         print(json.dumps(out, ensure_ascii=False))
@@ -787,7 +885,7 @@ def cmd_list(args) -> int:
 
 
 def cmd_add(args) -> int:
-    name = url = icon = key = ""
+    name = url = icon = key = category = ""
     i = 0
     while i < len(args):
         a = args[i]
@@ -799,12 +897,15 @@ def cmd_add(args) -> int:
             icon, i = args[i + 1], i + 2
         elif a in ("--key", "-k") and i + 1 < len(args):
             key, i = args[i + 1], i + 2
+        elif a in ("--category", "-c") and i + 1 < len(args):
+            category, i = args[i + 1], i + 2
         else:
             die(f"unknown option: {a}")
     name = validate_name(name)
     url = normalize_url(url)
 
     cfg = load_config(create=True)
+    category = clean_category(cfg, category)
     for app in cfg["apps"]:
         if app.get("name", "").lower() == name.lower() or app.get("url") == url:
             die(f"{name} already exists")
@@ -814,6 +915,8 @@ def cmd_add(args) -> int:
     if key and not re.fullmatch(r"[A-Z0-9]", key):
         die("the shortcut key must be one letter or digit")
     app = {"name": name, "slug": slug, "url": url, "key": key, "icon": ""}
+    if category:
+        app["category"] = category
     app["icon"] = install_icon(app, icon)
     cfg["apps"].append(app)
     save_config(cfg)
@@ -934,6 +1037,97 @@ def cmd_sync(args) -> int:
     return 0
 
 
+def cmd_set_category(args) -> int:
+    if len(args) != 2:
+        die("usage: set-category SLUG|NAME CATEGORY  (CATEGORY none: no category)")
+    cfg = load_config()
+    category = clean_category(cfg, args[1])
+    app = find_app(cfg, args[0])
+    if category:
+        app["category"] = category
+    else:
+        app.pop("category", None)
+    save_config(cfg)
+    sync(cfg)
+    print(json.dumps(app, ensure_ascii=False))
+    return 0
+
+
+def cmd_categories(args) -> int:
+    cfg = load_config()
+    cats = [dict(c, count=sum(1 for a in cfg.get("apps", []) if category_of(a, cfg) == c["id"]))
+            for c in categories(cfg)]
+    if "--json" in args or not sys.stdout.isatty():
+        print(json.dumps(cats, ensure_ascii=False))
+    else:
+        for c in cats:
+            print(f"  {c['id']:<16} {c['label']:<24} {c['count']} web apps")
+        if not cats:
+            print("  (no categories)")
+    return 0
+
+
+def cmd_category_add(args) -> int:
+    if len(args) != 1:
+        die("usage: category-add LABEL")
+    label = validate_category_label(args[0])
+    cfg = load_config(create=True)
+    cats = categories(cfg)
+    if any(c["label"].lower() == label.lower() for c in cats):
+        die(f"there is already a category named {label}")
+    base = slugify(label)[:40] or "category"
+    ids = {c["id"] for c in cats}
+    cid, n = base, 2
+    while cid in ids:
+        cid, n = f"{base[:36]}-{n}", n + 1
+    cats.append({"id": cid, "label": label})
+    cfg["categories"] = cats
+    save_config(cfg)
+    print(json.dumps({"id": cid, "label": label}, ensure_ascii=False))
+    return 0
+
+
+def find_category(cfg: dict, cid: str) -> dict:
+    for c in categories(cfg):
+        if c["id"] == cid:
+            return c
+    die(f"no category {cid!r}")
+
+
+def cmd_category_rename(args) -> int:
+    if len(args) != 2:
+        die("usage: category-rename ID LABEL")
+    label = validate_category_label(args[1])
+    cfg = load_config()
+    cats = categories(cfg)
+    find_category(cfg, args[0])
+    if any(c["label"].lower() == label.lower() and c["id"] != args[0] for c in cats):
+        die(f"there is already a category named {label}")
+    for c in cats:
+        if c["id"] == args[0]:
+            c["label"] = label
+    cfg["categories"] = cats
+    save_config(cfg)
+    sync(cfg)                       # its web apps' search keyword
+    print(json.dumps({"id": args[0], "label": label}, ensure_ascii=False))
+    return 0
+
+
+def cmd_category_remove(args) -> int:
+    if len(args) != 1:
+        die("usage: category-remove ID")
+    cfg = load_config()
+    find_category(cfg, args[0])
+    cfg["categories"] = [c for c in categories(cfg) if c["id"] != args[0]]
+    for app in cfg.get("apps", []):
+        if app.get("category") == args[0]:
+            app.pop("category", None)
+    save_config(cfg)
+    sync(cfg)
+    print(json.dumps({"removed": args[0]}))
+    return 0
+
+
 def main(argv) -> int:
     if len(argv) < 2 or argv[1] in ("-h", "--help", "help"):
         print(__doc__)
@@ -950,6 +1144,11 @@ def main(argv) -> int:
         "set-browser": cmd_set_browser,
         "seed": cmd_seed,
         "sync": cmd_sync,
+        "set-category": cmd_set_category,
+        "categories": cmd_categories,
+        "category-add": cmd_category_add,
+        "category-rename": cmd_category_rename,
+        "category-remove": cmd_category_remove,
     }
     if cmd not in table:
         die(f"unknown command: {cmd} (see --help)")
