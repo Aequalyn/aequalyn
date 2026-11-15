@@ -270,7 +270,7 @@ fi
 if [[ -n "$_saved_th" ]]; then
     printf '%s' "$_saved_th" > "$TARGET/.config/quickshell/theme.conf"
 else
-    printf 'wallpaper' > "$TARGET/.config/quickshell/theme.conf"
+    printf 'theme:basalt' > "$TARGET/.config/quickshell/theme.conf"
 fi
 
 # 4b. Themes (folder themes with palettes + backgrounds). Packaged installs
