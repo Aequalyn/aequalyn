@@ -118,6 +118,7 @@ hl.bind(M .. " + E",       hl.dsp.exec_cmd(files))
 hl.bind(M .. " + B",       hl.dsp.exec_cmd(browser))
 hl.bind(M .. " + SPACE",   hl.dsp.exec_cmd("qs ipc call programs toggle"))  -- Programs menu
 hl.bind(M .. " + D",       hl.dsp.exec_cmd("qs ipc call launcher toggle"))
+hl.bind(M .. " + ALT + A", hl.dsp.exec_cmd("qs ipc call defaults toggle")) -- Default apps launcher
 hl.bind(M .. " + COMMA",   hl.dsp.exec_cmd("qs ipc call aequalyn settings"))
 -- Window layouts: Super + L steps through them, the control center shows them all
 hl.bind(M .. " + L",         hl.dsp.exec_cmd("aequalyn-layout next"))

@@ -56,6 +56,30 @@ current = {
     "fileManager": q("inode/directory"),
 }
 
+# Coding agents are selected separately from XDG MIME handlers. Include only
+# commands the user can launch now; installation and metadata come from the same
+# manager used by Control Center -> AI tools.
+try:
+    tools = json.loads(subprocess.check_output(
+        ["aequalyn-ai-tool", "list", "--json"], text=True,
+        stderr=subprocess.DEVNULL,
+    ))
+    apps["aiTool"] = [
+        {"id": tool["id"], "name": tool["name"]}
+        for tool in tools
+        if tool.get("installed") or tool.get("availableElsewhere")
+    ]
+except (OSError, subprocess.CalledProcessError, json.JSONDecodeError):
+    apps["aiTool"] = []
+
+try:
+    current["aiTool"] = subprocess.check_output(
+        ["aequalyn-ai-tool", "get-default"], text=True,
+        stderr=subprocess.DEVNULL,
+    ).strip()
+except (OSError, subprocess.CalledProcessError):
+    current["aiTool"] = ""
+
 term = ""
 cfg = os.path.expanduser("~/.config/xdg-terminals.list")
 if os.path.exists(cfg):

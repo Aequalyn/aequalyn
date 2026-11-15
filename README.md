@@ -147,14 +147,19 @@ Everything works without AI.
 ## AI and development tools
 
 **Settings → AI tools** can install, update and remove Claude Code, Codex CLI,
-GitHub Copilot CLI and Gemini CLI for the current user. They are installed from
-their publishers' npm packages under `~/.local/share/aequalyn/ai-tools`; their
+GitHub Copilot CLI, Gemini CLI, OpenCode, Qwen Code, Kilo Code CLI, Cline CLI,
+Crush and Amp CLI for the current user. They are installed from their
+publishers' npm packages under `~/.local/share/aequalyn/ai-tools`; their
 commands are linked into `~/.local/bin`. Node.js and npm are required. Agent
-sign-in and configuration stay with each provider.
+sign-in and configuration stay with each provider. **Settings → Apps** lets you
+choose defaults for the browser, terminal, file manager, text and video apps, and
+the installed AI coding tool. Press **Super + Alt + A** to open the default apps
+launcher. **Super + Space** opens the programs menu.
 
 The same manager is available in a terminal as `aequalyn-ai-tool list`,
-`aequalyn-ai-tool install codex`, `aequalyn-ai-tool update codex`, and
-`aequalyn-ai-tool remove codex`. Removing a tool leaves its settings and
+`aequalyn-ai-tool install codex`, `aequalyn-ai-tool update codex`,
+`aequalyn-ai-tool remove codex`, and `aequalyn-ai-tool set-default opencode`.
+Removing a tool leaves its settings and
 sign-in data in place. The optional Developer profile includes programming
 languages, mise, npm and uv; the Store can add packages to an existing system.
 
