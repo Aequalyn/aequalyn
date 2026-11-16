@@ -3,7 +3,7 @@
   "logo": {
     "type": "file",
     "source": "~/.config/fastfetch/aequalyn.txt",
-    "width": 23,
+    "width": 46,
     "padding": { "right": 2 }
   },
   "display": {
