@@ -72,17 +72,39 @@ fi
 #    QML/load failure is diagnosable instead of disappearing into /dev/null.
 QS_CONFIG="$XDG_CONFIG_HOME/quickshell"
 if command -v qs >/dev/null 2>&1; then
-    if pgrep -x qs >/dev/null 2>&1; then
-        log "quickshell already running"
-    else
-        for attempt in 1 2 3; do
-            if qs -n -d -p "$QS_CONFIG" >>"$SESSION_LOG" 2>&1; then
-                log "quickshell started (config $QS_CONFIG)"
-                break
+    # On the live ISO two callers reach this at once: hyprland.lua's
+    # hyprland.start hook and aequalyn-live-session's start_shell. A bare
+    # `pgrep -x qs` is racy -- both can check before either has launched qs,
+    # and `qs -n` cannot help when the two start together. Serialise the
+    # check-and-launch with flock so exactly one shell is ever started.
+    QS_LOCK="$XDG_RUNTIME_DIR/aequalyn-quickshell-start.lock"
+    if exec 8>"$QS_LOCK" 2>/dev/null; then
+        if flock -n 8; then
+            if pgrep -x qs >/dev/null 2>&1; then
+                log "quickshell already running"
+            else
+                for attempt in 1 2 3; do
+                    # 8>&- : the daemon must not inherit the lock fd, or the
+                    # flock would stay held after this script exits.
+                    if qs -n -d -p "$QS_CONFIG" 8>&- >>"$SESSION_LOG" 2>&1; then
+                        log "quickshell started (config $QS_CONFIG)"
+                        break
+                    fi
+                    log "quickshell failed to start (attempt $attempt)"
+                    sleep 1
+                done
             fi
-            log "quickshell failed to start (attempt $attempt)"
-            sleep 1
-        done
+        else
+            log "another session-start is launching QuickShell; skipping"
+        fi
+        exec 8>&-
+    else
+        log "cannot open $QS_LOCK; falling back to pgrep guard"
+        if pgrep -x qs >/dev/null 2>&1; then
+            log "quickshell already running"
+        else
+            qs -n -d -p "$QS_CONFIG" 8>&- >>"$SESSION_LOG" 2>&1 || log "quickshell failed to start"
+        fi
     fi
 else
     log "qs not found in PATH"
