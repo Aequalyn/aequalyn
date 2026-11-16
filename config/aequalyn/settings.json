@@ -21,24 +21,26 @@
     "pluginOrder": [
       "appsmenu",
       "workspaces",
+      "layouts",
+      "network",
+      "atelier",
       "clock",
       "media",
       "title",
+      "battery",
       "volume",
       "brightness",
       "cpu",
-      "network",
       "bluetooth",
-      "battery",
       "temperature",
       "caffeine",
       "tray",
-      "power",
       "screenrecorder",
       "screenshot",
-      "layouts",
-      "atelier",
-      "settingsbutton"
+      "power",
+      "settingsbutton",
+      "plume",
+      "altscape"
     ],
     "showBluetooth": true,
     "showSettingsButton": true,
@@ -50,28 +52,30 @@
     "barLeft": [
       "appsmenu",
       "workspaces",
-      "layouts"
+      "layouts",
+      "network",
+      "atelier"
     ],
     "barCenter": [
       "clock",
       "media",
-      "title"
+      "title",
+      "battery",
+      "volume"
     ],
     "barRight": [
-      "volume",
       "brightness",
       "cpu",
-      "network",
       "bluetooth",
-      "battery",
       "temperature",
       "caffeine",
       "tray",
-      "power",
       "screenrecorder",
       "screenshot",
-      "atelier",
-      "settingsbutton"
+      "power",
+      "settingsbutton",
+      "plume",
+      "altscape"
     ],
     "showCaffeine": true,
     "showAtelier": true,
