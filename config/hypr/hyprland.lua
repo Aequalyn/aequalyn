@@ -31,7 +31,7 @@ end
 
 -- Fallback first, then the generated monitors.lua (written by the Aequalyn
 -- display manager). dofile (not require) so `hyprctl reload` re-reads it.
-hl.monitor({ output = "", mode = "preferred", position = "auto", scale = "auto" })
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
 pcall(dofile, (os.getenv("HOME") or "") .. "/.config/hypr/monitors.lua")
 
 -- Generated + user config (dofile, not require, so `hyprctl reload` re-reads
