@@ -30,11 +30,12 @@ TOOLS = {
         "command": "copilot",
         "description": "GitHub's coding agent for the terminal.",
     },
-    "gemini": {
-        "name": "Gemini CLI",
-        "package": "@google/gemini-cli",
-        "command": "gemini",
-        "description": "Google's coding agent for the terminal.",
+    "antigravity": {
+        "name": "Antigravity CLI",
+        "package": "",
+        "installer": "official",
+        "command": "agy",
+        "description": "Google's agent-first coding assistant for the terminal.",
     },
     "opencode": {
         "name": "OpenCode",
@@ -82,7 +83,20 @@ def default_tool() -> str:
         value = DEFAULT_FILE.read_text(encoding="utf-8").strip()
     except OSError:
         return ""
+    if value == "gemini":
+        return "antigravity" if available_command_path("antigravity") else ""
     return value if value in TOOLS else ""
+
+
+def available_command_path(tool_id: str) -> str:
+    path = shutil.which(TOOLS[tool_id]["command"])
+    if path:
+        return path
+    if TOOLS[tool_id].get("installer") == "official":
+        candidate = Path.home() / ".local/bin" / TOOLS[tool_id]["command"]
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return ""
 
 
 def set_default_tool(tool_id: str) -> int:
@@ -97,7 +111,7 @@ def set_default_tool(tool_id: str) -> int:
     if tool_id not in TOOLS:
         print(f"Unknown tool {tool_id!r}. Choose one of: {', '.join(TOOLS)}.", file=sys.stderr)
         return 2
-    if not managed_install(tool_id) and not shutil.which(TOOLS[tool_id]["command"]):
+    if not managed_install(tool_id) and not available_command_path(tool_id):
         print(f"{TOOLS[tool_id]['name']} is not installed or available on PATH.", file=sys.stderr)
         return 1
     try:
@@ -154,7 +168,7 @@ def list_tools(as_json: bool) -> int:
         _, _, launcher = tool_paths(tool_id)
         owned = managed_install(tool_id)
         collision = (launcher.exists() or launcher.is_symlink()) and not managed_link(tool_id)
-        elsewhere = shutil.which(tool["command"])
+        elsewhere = available_command_path(tool_id)
         row = {
             "id": tool_id,
             "name": tool["name"],
@@ -199,6 +213,21 @@ def run_npm(args: list[str]) -> int:
     return process.wait()
 
 
+def install_official_cli(tool: dict[str, str]) -> int:
+    result = run_npm([
+        "bash", "-o", "pipefail", "-c",
+        "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+    ])
+    if result != 0:
+        return result
+    if not available_command_path("antigravity"):
+        print(f"Installer finished, but {tool['command']} is not available in ~/.local/bin.", file=sys.stderr)
+        return 1
+    print(f"{tool['name']} is ready as {tool['command']}.")
+    print("Run it in a terminal to sign in with Google.")
+    return 0
+
+
 def change_tool(action: str, tool_id: str) -> int:
     tool = TOOLS[tool_id]
     prefix, executable, launcher = tool_paths(tool_id)
@@ -226,6 +255,12 @@ def change_tool(action: str, tool_id: str) -> int:
     if action == "update" and not owned:
         print(f"{tool['name']} is not installed by Aequalyn; install it first.", file=sys.stderr)
         return 1
+
+    if tool.get("installer") == "official":
+        if action != "install":
+            print(f"{tool['name']} is installed by Google's installer and is not managed by Aequalyn.", file=sys.stderr)
+            return 1
+        return install_official_cli(tool)
 
     if not owned:
         if managed_package(tool_id):
