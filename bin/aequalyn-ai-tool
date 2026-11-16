@@ -213,6 +213,17 @@ def run_npm(args: list[str]) -> int:
     return process.wait()
 
 
+def npm_command() -> list[str] | None:
+    if shutil.which("node") and shutil.which("npm"):
+        return ["npm"]
+    mise = shutil.which("mise")
+    if mise:
+        # Keep installer behavior independent of shell startup files and the
+        # caller's project directory; mise provides a Node LTS runtime for npm.
+        return [mise, "exec", "-C", str(Path.home()), "node@lts", "--", "npm"]
+    return None
+
+
 def install_official_cli(tool: dict[str, str]) -> int:
     result = run_npm([
         "bash", "-o", "pipefail", "-c",
@@ -237,7 +248,11 @@ def change_tool(action: str, tool_id: str) -> int:
         if not managed_package(tool_id):
             print(f"{tool['name']} is not installed by Aequalyn.", file=sys.stderr)
             return 1
-        npm_args = ["npm", "uninstall", "--global", "--prefix", str(prefix),
+        npm = npm_command()
+        if not npm:
+            print("Node.js/npm or mise is required to remove this managed tool.", file=sys.stderr)
+            return 1
+        npm_args = [*npm, "uninstall", "--global", "--prefix", str(prefix),
                     "--no-audit", "--no-fund", tool["package"]]
         result = run_npm(npm_args)
         if result == 0:
@@ -284,17 +299,18 @@ def change_tool(action: str, tool_id: str) -> int:
             print(f"Refusing to replace the existing file {launcher}.", file=sys.stderr)
             return 1
 
-    if not shutil.which("node") or not shutil.which("npm"):
+    npm = npm_command()
+    if not npm:
         print(
-            "Node.js and npm are required. Install the nodejs and npm packages "
-            "from Aequalyn's Store, then try again.",
+            "Node.js/npm or mise is required. Install mise or the nodejs and npm "
+            "packages from Aequalyn's Store, then try again.",
             file=sys.stderr,
         )
         return 1
 
     prefix.mkdir(parents=True, exist_ok=True)
     package = tool["package"] + "@latest"
-    npm_args = ["npm", "install", "--global", "--prefix", str(prefix),
+    npm_args = [*npm, "install", "--global", "--prefix", str(prefix),
                 "--no-audit", "--no-fund", "--ignore-scripts=false", package]
     result = run_npm(npm_args)
     if result != 0:
