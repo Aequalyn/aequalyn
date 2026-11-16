@@ -12,6 +12,9 @@
 # layouts, docks, default apps, terminal and GTK preferences, colours, wallpaper and
 # theme) and first saves a copy in ~/.local/state/aequalyn/backups.
 #
+# Migrations in migrations/ (of the newest Aequalyn) each run once, as root, in name
+# order. A migration exits 0 when done, or 3 to be tried again on the next update.
+#
 # It lives in Aequalyn's bin/, so every update also brings the newest updater.
 # AEQUALYN_ROOT, AEQUALYN_BIN_DIR and AEQUALYN_GIT point it elsewhere, for testing.
 set -Eeuo pipefail
@@ -27,7 +30,7 @@ main() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --no-pull) DO_PULL=0; shift ;;
-            -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+            -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
             *) printf 'unknown option: %s\n' "$1" >&2; exit 2 ;;
         esac
     done
@@ -63,6 +66,34 @@ main() {
         step="putting the newest $what in place"
         g "$dir" checkout -q -f -B main FETCH_HEAD
         g "$dir" reset -q --hard FETCH_HEAD
+    }
+
+    # Runs the migrations/*.sh of the newest Aequalyn that are not recorded yet, in name
+    # order, as root. Each one that finishes is recorded in $MIGRATIONS_DONE; a failure
+    # stops the update, so the next run tries it again.
+    MIGRATIONS_DONE=/var/lib/aequalyn/migrations.done
+    run_migrations() {
+        local dir="$AQ_ROOT/migrations" f name rc
+        [[ -d "$dir" ]] || return 0
+        $SUDO mkdir -p "$(dirname "$MIGRATIONS_DONE")"
+        $SUDO touch "$MIGRATIONS_DONE"
+        while IFS= read -r f; do
+            [[ -f "$f" ]] || continue
+            name=$(basename "$f")
+            grep -qxF "$name" "$MIGRATIONS_DONE" && continue
+            echo "==> migration $name"
+            rc=0
+            $SUDO bash "$f" || rc=$?
+            if [[ $rc -eq 3 ]]; then
+                echo "    not ready yet; it runs on the next update"
+                continue
+            fi
+            if [[ $rc -ne 0 ]]; then
+                echo "aequalyn-update: migration $name failed (exit $rc); it runs again next time." >&2
+                exit 1
+            fi
+            printf '%s\n' "$name" | $SUDO tee -a "$MIGRATIONS_DONE" >/dev/null
+        done < <(printf '%s\n' "$dir"/*.sh | LC_ALL=C sort)
     }
 
     if [[ $DO_PULL -eq 1 ]]; then
@@ -156,6 +187,10 @@ main() {
         $SUDO mv -f "$BIN_DIR/.$n.new" "$BIN_DIR/$n"
     done
     $SUDO chmod 755 "$BIN_DIR"/aequalyn-* 2>/dev/null || true
+
+    echo "==> running migrations"
+    step="running migrations"
+    run_migrations
 
     echo "==> restarting the shell"
     step="restarting the shell"

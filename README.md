@@ -118,6 +118,30 @@ Dependencies: `quickshell`, `matugen`, `awww`, `hyprland`, `jq`, `brightnessctl`
 `playerctl`, `ttf-jetbrains-mono-nerd`, plus the Qt6/GTK runtime. See
 `packages/desktop.packages`.
 
+## Updating and migrations
+
+```sh
+aequalyn-update                 # get the newest Aequalyn and shell, re-apply, run pending migrations
+```
+
+Changes that have to touch an existing system (removing old files, stopping a
+service, fixing config) live in `migrations/`, named by date and number, for
+example `migrations/20261116-2.sh`. `aequalyn-update` downloads the newest
+Aequalyn, then runs every migration not yet recorded in
+`/var/lib/aequalyn/migrations.done`, in name order, as root. Each one runs once.
+
+A migration exits `0` when done, or `3` to be tried again on the next update
+(for example while a package it needs is still missing). Any other exit code
+stops the update, and the migration runs again next time.
+
+To run one by hand:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Aequalyn/aequalyn/main/migrations/20261116-2.sh | sudo bash
+```
+
+Migrations must be safe to run twice: check first, then change.
+
 ## Build the ISO
 
 See [aequalyn-iso](https://github.com/Aequalyn/aequalyn-iso):
