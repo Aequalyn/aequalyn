@@ -149,7 +149,7 @@ info "shell -> $TARGET/.config/quickshell"
 
 # 2. Desktop config tree. Generated colour files are only installed on a
 #    fresh home or with --force, so a user's current palette survives updates.
-for dir in hypr kitty foot fuzzel qt6ct gtk-3.0 gtk-4.0 btop matugen aequalyn quickshell mimeapps.list; do
+for dir in hypr kitty foot fuzzel qt6ct gtk-3.0 gtk-4.0 btop matugen fastfetch aequalyn quickshell mimeapps.list; do
     # Never touch the user's hand-tuned hyprland config on updates.
     [[ "$SKIP_HYPR" -eq 1 && "$dir" == "hypr" ]] && continue
     src="$ROOT/config/$dir"
