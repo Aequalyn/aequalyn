@@ -303,7 +303,7 @@ Type=Application
 Name=Install Aequalyn
 Comment=Install Aequalyn to this machine
 Exec=sudo aequalyn-install
-Icon=system-software-install
+Icon=aequalyn-install
 Terminal=false
 Categories=System;
 EOF
