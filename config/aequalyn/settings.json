@@ -6,6 +6,7 @@
     "barHeight": 32,
     "barOpacity": 100,
     "showClock": true,
+    "showCalendar": true,
     "showWorkspaces": true,
     "workspaceCount": 5,
     "workspaceLabelStyle": "numbers",
@@ -28,6 +29,7 @@
       "network",
       "atelier",
       "clock",
+      "calendar",
       "media",
       "title",
       "battery",
@@ -61,6 +63,7 @@
     ],
     "barCenter": [
       "clock",
+      "calendar",
       "media",
       "title",
       "battery",
