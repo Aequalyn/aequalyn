@@ -21,6 +21,10 @@
     "showTray": true,
     "clockSeconds": false,
     "use24h": true,
+    "showBarDate": true,
+    "clockDateFormat": "ddd MMM d",
+    "clockLeftClick": "calendar",
+    "clockRightClick": "clock-settings",
     "wallpaperPath": "",
     "pluginOrder": [
       "appsmenu",
