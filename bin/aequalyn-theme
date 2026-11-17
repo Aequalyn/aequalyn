@@ -143,9 +143,19 @@ elif [[ -x "$HOME/.local/bin/aequalyn-nautilus-palette" ]]; then
     "$HOME/.local/bin/aequalyn-nautilus-palette" >/dev/null 2>&1 || true
 fi
 
-# If Nautilus is running, restart it so it picks up the new theme/palette.
-# If not running, leave it closed (palette files are already updated for next launch).
-if command -v nautilus >/dev/null 2>&1 && pgrep -x nautilus >/dev/null 2>&1; then
+# Only restart Nautilus when it actually has a window open. A background
+# `nautilus --gapplication-service` process must not get a new window just
+# because the palette changed; the extension reloads the CSS in open windows.
+nautilus_has_window() {
+    if command -v hyprctl >/dev/null 2>&1; then
+        local classes
+        classes=$(hyprctl clients -j 2>/dev/null | jq -r '.[].class // empty' 2>/dev/null || true)
+        printf '%s\n' "$classes" | grep -qi nautilus && return 0
+        return 1
+    fi
+    pgrep -x nautilus >/dev/null 2>&1
+}
+if command -v nautilus >/dev/null 2>&1 && nautilus_has_window; then
     nautilus -q >/dev/null 2>&1 || true
     sleep 0.4
     nautilus >/dev/null 2>&1 &
@@ -156,6 +166,12 @@ fi
 if [[ "$(setting '.appearance.themeApps' 'true')" == "true" && -f "$APPS_CONF" ]]; then
     matugen image "$IMG" -c "$APPS_CONF" "${MATUGEN_ARGS[@]}" \
         || warn "matugen failed on app templates"
+fi
+
+# 4. Browser policy (opt-in), using the accent just generated. The helper is a
+# no-op while "Browsers use these colours too" is off.
+if command -v aequalyn-browser-theme >/dev/null 2>&1; then
+    aequalyn-browser-theme sync >/dev/null 2>&1 || true
 fi
 
 log "done"

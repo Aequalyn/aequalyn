@@ -365,11 +365,23 @@ try:
 except Exception:
     pass
 
-# If Nautilus is running, restart it so it picks up the new theme/palette.
-# If not running, leave it closed (palette files are already updated for next launch).
+# Only restart Nautilus when it actually has a window open. A background
+# `nautilus --gapplication-service` process must not get a new window just
+# because the palette changed; the extension reloads the CSS in open windows.
+def nautilus_has_window():
+    try:
+        out = subprocess.run(['hyprctl', 'clients', '-j'], capture_output=True,
+                             text=True, timeout=2).stdout
+        clients = json.loads(out) if out.strip() else []
+        return any('nautilus' in str(c.get('class', '')).lower() for c in clients)
+    except Exception:
+        return subprocess.run(['pgrep', '-x', 'nautilus'],
+                              stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL).returncode == 0
+
+
 try:
-    running = subprocess.run(['pgrep', '-x', 'nautilus'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
-    if running:
+    if nautilus_has_window():
         subprocess.run(['nautilus', '-q'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(['sleep', '0.4'])
         subprocess.Popen(['nautilus'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)

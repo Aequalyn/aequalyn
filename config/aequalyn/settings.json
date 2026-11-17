@@ -3,6 +3,7 @@
   "appearance": {
     "themeMode": "wallpaper",
     "themeApps": true,
+    "themeBrowser": false,
     "barHeight": 32,
     "barOpacity": 100,
     "showClock": true,
@@ -83,13 +84,15 @@
       "screenrecorder",
       "screenshot",
       "power",
+      "clipscape",
       "settingsbutton",
       "plume",
       "altscape"
     ],
     "showCaffeine": true,
     "showAtelier": true,
-    "showLayouts": true
+    "showLayouts": true,
+    "showClipscape": true
   },
   "hyprland": {
     "gapsIn": 5,
@@ -195,7 +198,7 @@
     "osd",
     "monitorManager",
     "idleInhibitor",
-    "clipboard",
+    "clipscape",
     "powerMenu",
     "docks",
     "settings"

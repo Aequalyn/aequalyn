@@ -212,7 +212,7 @@ languages, mise, npm and uv; the Store can add packages to an existing system.
 | `Super + -` / `=` | Main pane larger / smaller, held to keep going (`Alt`: finer, `Ctrl`: coarser) |
 | `Super + O` | Display manager |
 | `Super + C` / `V` / `X` / `A` | Universal copy / paste / cut / select-all |
-| `Super + Ctrl + V` | Clipboard history (text + images) |
+| `Super + Ctrl + V` | Clipscape clipboard history (search, pins, previews) |
 | `Super + Shift + C` | Caffeine (idle inhibit) |
 | `Super + Shift + V` | Toggle floating |
 | `Super + Shift + R` | Toggle screen recording |

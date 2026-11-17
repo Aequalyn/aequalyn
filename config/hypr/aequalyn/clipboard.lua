@@ -2,7 +2,7 @@
 --
 -- Super+A / C / V / X work in every app; terminals get Ctrl+Shift+C / V so the
 -- same shortcut copies and pastes there too. Super+Ctrl+V opens the Aequalyn
--- clipboard history overlay (text + images, searchable).
+-- Clipscape clipboard history (search, pins, previews).
 --
 -- The down/up split works around Hyprland's send_shortcut leaving synthetic
 -- key state stuck. A virtual keyboard (wtype) cannot be used because the
@@ -47,4 +47,4 @@ hl.bind(mod .. " + A",           send_shortcut_once("CTRL", "A"))
 hl.bind(mod .. " + C",           universal("CTRL", "C", "CTRL SHIFT", "C"))
 hl.bind(mod .. " + V",           universal("CTRL", "V", "CTRL SHIFT", "V"))
 hl.bind(mod .. " + X",           send_shortcut_once("CTRL", "X"))
-hl.bind(mod .. " + CTRL + V",    hl.dsp.exec_cmd("qs ipc call clipboard toggle"))
+hl.bind(mod .. " + CTRL + V",    hl.dsp.exec_cmd("qs ipc call clipscape toggle"))

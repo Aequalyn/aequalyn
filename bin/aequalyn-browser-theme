@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+# aequalyn-browser-theme -- let Chromium-based browsers use the Aequalyn bar colour.
+#
+# Usage:
+#   aequalyn-browser-theme sync [--color '#rrggbb']   write the policy if the setting is on
+#   aequalyn-browser-theme on [--prompt]              turn it on now
+#   aequalyn-browser-theme off [--prompt]             turn it off (remove the policy)
+#
+# Chromium only reads its frame colour from a system-wide managed policy, so the
+# bar's base colour (bgBase) is published as BrowserThemeColor there.
+# No BrowserColorScheme key: it is not a valid Chromium policy (browsers report
+# it as an error) and the theme colour works on its own. One sudo authorisation
+# is needed; --prompt offers a GUI prompt the first time and installs a narrow,
+# passwordless rule for later calls.
+
+set -uo pipefail
+
+SETTINGS="${XDG_CONFIG_HOME:-$HOME/.config}/aequalyn/settings.json"
+# Prefer the themed prompt; fall back to any askpass-capable GUI helper.
+if command -v zenity >/dev/null 2>&1 && command -v aequalyn-askpass >/dev/null 2>&1; then
+    ASKPASS=$(command -v aequalyn-askpass)
+else
+    ASKPASS="$(command -v zenity || command -v yad || command -v ssh-askpass || true)"
+fi
+SELF="$(readlink -f "$0")"
+
+log() { printf '\033[0;34m[aequalyn-browser-theme]\033[0m %s\n' "$*" >&2; }
+
+# ---- root half: the only part that touches /etc ----------------------------
+if [[ ${1:-} == "--root" ]]; then
+    shift
+    action="${1:-}"; shift || true
+    case "$action" in
+        write)
+            color="${1:-}"; shift || true
+            [[ $color =~ ^#[0-9a-fA-F]{6}$ ]] || exit 1
+            payload=$(printf '{"BrowserThemeColor": "%s"}\n' "$color")
+            for dir in "$@"; do
+                [[ -n $dir ]] || continue
+                mkdir -p "$dir" 2>/dev/null || continue
+                printf '%s' "$payload" > "$dir/color.json" 2>/dev/null || continue
+                chown root:root "$dir/color.json" 2>/dev/null || true
+                chmod 644 "$dir/color.json" 2>/dev/null || true
+            done
+            ;;
+        remove)
+            for dir in "$@"; do
+                [[ -n $dir ]] || continue
+                rm -f "$dir/color.json" 2>/dev/null || true
+            done
+            ;;
+        *) exit 1 ;;
+    esac
+    exit 0
+fi
+
+# ---- user half --------------------------------------------------------------
+action="${1:-sync}"; shift || true
+prompt=0
+color=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --prompt) prompt=1; shift ;;
+        --color)  color="${2:-}"; shift 2 ;;
+        *)        shift ;;
+    esac
+done
+
+current_color() {
+    local tc id="" c=""
+    tc=$(cat "$HOME/.config/quickshell/theme.conf" 2>/dev/null || true)
+    # theme.conf is authoritative: in wallpaper mode `aequalyn-themes current`
+    # stays at the last folder theme, which would publish a stale colour.
+    if [[ $tc == theme:* ]]; then
+        id=${tc#theme:}
+    elif [[ $tc != wallpaper ]] && command -v aequalyn-themes >/dev/null 2>&1; then
+        id=$(aequalyn-themes current 2>/dev/null || true)
+    fi
+    if [[ -n $id ]] && command -v aequalyn-themes >/dev/null 2>&1; then
+        c=$(aequalyn-themes list --json 2>/dev/null \
+            | jq -r --arg id "$id" '(.[]? | select(.id == $id) | .palette.bgBase // empty)' \
+            2>/dev/null | head -1 || true)
+    fi
+    if [[ -z $c ]]; then
+        c=$(jq -r '.bgBase // empty' \
+            "$HOME/.config/quickshell/theme-switcher/wallpaper-theme.json" 2>/dev/null || true)
+    fi
+    if [[ -z $c ]]; then
+        c=$(jq -r '.background // .bgBase // empty' "$HOME/.cache/aequalyn/colors.json" 2>/dev/null || true)
+    fi
+    [[ $c =~ ^#?[0-9a-fA-F]{6}$ ]] || c="#121515"
+    [[ $c == \#* ]] || c="#$c"
+    printf '%s' "${c,,}"
+}
+
+policy_dirs() {
+    local dirs=() dir
+    # Every Chromium-style managed-policy directory that exists on this machine
+    # gets color.json -- not just the browsers we can find on PATH. This covers
+    # Chrome, Chromium, Edge, Brave, Vivaldi, Opera and any other derivative,
+    # including ones installed later or as Flatpak-style wrapper packages.
+    while IFS= read -r dir; do
+        [[ -n $dir ]] && dirs+=("$dir")
+    done < <(find /etc -type d -path '*/policies/managed' -print 2>/dev/null | sort -u)
+
+    # Also create the dirs for supported browsers that are installed but do not
+    # have a policy dir yet, so they pick up the colour on their first launch.
+    local pair cmd
+    for pair in \
+        "chromium:/etc/chromium/policies/managed" \
+        "chromium-browser:/etc/chromium/policies/managed" \
+        "google-chrome:/etc/opt/chrome/policies/managed" \
+        "google-chrome-stable:/etc/opt/chrome/policies/managed" \
+        "google-chrome-beta:/etc/opt/chrome/policies/managed" \
+        "microsoft-edge:/etc/opt/edge/policies/managed" \
+        "microsoft-edge-stable:/etc/opt/edge/policies/managed" \
+        "microsoft-edge-dev:/etc/opt/edge/policies/managed" \
+        "brave:/etc/brave/policies/managed" \
+        "brave-browser:/etc/brave/policies/managed" \
+        "vivaldi:/etc/vivaldi/policies/managed" \
+        "vivaldi-stable:/etc/vivaldi/policies/managed" \
+        "opera:/etc/opt/opera/policies/managed" \
+        "yandex-browser:/etc/yandex-browser/policies/managed"; do
+        cmd=${pair%%:*}; dir=${pair#*:}
+        command -v "$cmd" >/dev/null 2>&1 || continue
+        [[ " ${dirs[*]:-} " == *" $dir "* ]] || dirs+=("$dir")
+    done
+    printf '%s\n' "${dirs[@]}"
+}
+
+# sudo_run <allow-prompt> <command...>
+# Try the command passwordlessly first. Testing `sudo -n true` is wrong: a user
+# with no passwordless rights fails that while still being allowed to run the
+# exact command our narrow rule grants. Only the explicit on/off actions (and an
+# explicit --prompt) allow the GUI askpass, so startup/theme-change syncs never
+# pop a dialog unexpectedly.
+sudo_run() {
+    local allow=$1; shift
+    if sudo -n "$@" 2>/dev/null; then
+        return 0
+    fi
+    if [[ $allow -eq 1 && -n $ASKPASS ]]; then
+        SUDO_ASKPASS="$ASKPASS" sudo -A "$@" 2>/dev/null
+        return $?
+    fi
+    [[ $allow -eq 1 && -z $ASKPASS ]] && log "no GUI password prompt found; install zenity or aequalyn-askpass"
+    return 1
+}
+
+ensure_rule() {
+    local rule=/etc/sudoers.d/aequalyn-browser-theme
+    local user; user=$(id -un)
+    local content
+    content=$(printf '%s\n' \
+        "# Aequalyn browser theming: let the shell update Chromium's managed policy." \
+        "$user ALL=(root) NOPASSWD: $SELF --root write *" \
+        "$user ALL=(root) NOPASSWD: $SELF --root remove *")
+    # The one step that can need a password: `install -m 440` both writes and
+    # sets the mode, so a non-passwordless user sees the askpass dialog once.
+    printf '%s\n' "$content" | sudo_run 1 install -m 440 /dev/stdin "$rule" >/dev/null 2>&1 || return 1
+}
+
+write_policy() { sudo_run "$1" "$SELF" --root write "$color" "${dirs[@]}"; }
+remove_policy() { sudo_run "$1" "$SELF" --root remove "${dirs[@]}"; }
+
+refresh_browsers() {
+    local cmd
+    for cmd in google-chrome google-chrome-stable google-chrome-beta \
+               chromium chromium-browser microsoft-edge microsoft-edge-stable \
+               microsoft-edge-dev brave brave-browser vivaldi vivaldi-stable \
+               opera yandex-browser; do
+        command -v "$cmd" >/dev/null 2>&1 || continue
+        "$cmd" --refresh-platform-policy --no-startup-window >/dev/null 2>&1 &
+    done
+    true
+}
+
+mapfile -t dirs < <(policy_dirs)
+
+case "$action" in
+    sync)
+        enabled=$(jq -r '.appearance.themeBrowser // false' "$SETTINGS" 2>/dev/null || echo false)
+        [[ $enabled == true ]] || exit 0
+        [[ -n $color ]] || color=$(current_color)
+        # Startup and theme changes: never prompt, only use an existing grant.
+        write_policy "$prompt" || true
+        ;;
+    on)
+        [[ -n $color ]] || color=$(current_color)
+        # Explicit toggle: try silently, then ask once and install the rule.
+        if ! write_policy 0; then
+            ensure_rule || true
+            write_policy 1 || true
+        fi
+        ;;
+    off)
+        if ! remove_policy 0; then
+            ensure_rule || true
+            remove_policy 1 || true
+        fi
+        ;;
+    *)
+        log "usage: $0 {sync|on|off} [--color '#rrggbb'] [--prompt]"
+        exit 2
+        ;;
+esac
+
+refresh_browsers
