@@ -165,6 +165,23 @@ hl.bind(M .. " + F", hl.dsp.window.fullscreen())
 hl.bind(M .. " + J", hl.dsp.layout("togglesplit"))
 hl.bind(M .. " + SHIFT + M", hl.dsp.exec_cmd("qs ipc call power toggle"))
 
+-- The built-in pack (shell plugins). Each key does something only while its plugin is
+-- on: control center › Plugins.
+hl.bind(M .. " + SLASH",          hl.dsp.exec_cmd("qs ipc call keyHints toggle"))     -- Key hints
+hl.bind(M .. " + SHIFT + SPACE",  hl.dsp.exec_cmd("qs ipc call palette toggle"))      -- Command palette
+hl.bind(M .. " + EQUAL",          hl.dsp.exec_cmd("qs ipc call calculator toggle"))   -- Calculator
+hl.bind(M .. " + PERIOD",         hl.dsp.exec_cmd("qs ipc call emoji toggle"))        -- Emoji
+hl.bind(M .. " + SHIFT + P",      hl.dsp.exec_cmd("qs ipc call colorPicker pick"))    -- Pick a colour on the screen
+hl.bind(M .. " + ALT + N",        hl.dsp.exec_cmd("qs ipc call notes toggle"))        -- Quick notes
+hl.bind(M .. " + SHIFT + ESCAPE", hl.dsp.exec_cmd("qs ipc call sysmon toggle"))       -- System monitor
+hl.bind(M .. " + ALT + X",        hl.dsp.exec_cmd("qs ipc call screenText capture"))  -- Copy text from the screen
+hl.bind(M .. " + ALT + T",        hl.dsp.exec_cmd("qs ipc call timer toggle"))        -- Timer
+hl.bind(M .. " + ALT + F",        hl.dsp.exec_cmd("qs ipc call focus toggle"))        -- Focus
+hl.bind(M .. " + ALT + SPACE",    hl.dsp.exec_cmd("qs ipc call aiAsk toggle"))        -- AI ask
+hl.bind(M .. " + ALT + E",        hl.dsp.exec_cmd("qs ipc call aiCommand toggle"))    -- AI command
+hl.bind(M .. " + ALT + V",        hl.dsp.exec_cmd("qs ipc call aiClipboard toggle"))  -- AI clipboard
+hl.bind(M .. " + ALT + D",        hl.dsp.exec_cmd("qs ipc call aiTidy toggle"))       -- AI tidy
+
 -- Focus / move
 -- Super + arrows (focus) and Super + Shift + arrows (swap): aequalyn/keys.lua
 
