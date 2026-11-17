@@ -1,0 +1,39 @@
+#!/bin/bash
+# aequalyn-lock-media: what is playing, for the lock screen's Now playing design.
+#   aequalyn-lock-media title | artist | state   one line, safe to show as markup
+#   aequalyn-lock-media cover                    a picture file of the cover, or nothing
+# The song's words are escaped (& < >): a title with them must not blank the label.
+# The cover is the player's own file when it hands one over, else the newest cover
+# the Media plugin made (~/.cache/aequalyn/media/covers).
+set -u
+esc() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+status=$(playerctl status 2>/dev/null || true)
+[[ "$status" == Playing || "$status" == Paused ]] || { [[ "${1:-}" == state ]] && echo ""; exit 0; }
+case "${1:-}" in
+    title)  playerctl metadata title 2>/dev/null | head -c 200 | esc ;;
+    artist) playerctl metadata artist 2>/dev/null | head -c 200 | esc ;;
+    state)  [[ "$status" == Playing ]] && echo "󰐊  Playing" || echo "󰏤  Paused" ;;
+    cover)
+        url=$(playerctl metadata mpris:artUrl 2>/dev/null || true)
+        src=""
+        if [[ "$url" == file://* ]]; then
+            p=$(printf '%b' "${url#file://}" 2>/dev/null)
+            [[ -f "$p" && -r "$p" ]] && src="$p"
+        fi
+        if [[ -z "$src" ]]; then
+            dir="${XDG_CACHE_HOME:-$HOME/.cache}/aequalyn/media/covers"
+            src=$(ls -t "$dir"/*.png 2>/dev/null | head -1)
+        fi
+        [[ -n "$src" ]] || exit 0
+        # a PNG of its own, named after the source and its time, made once
+        run="${XDG_RUNTIME_DIR:-/tmp}/aequalyn-lock"
+        mkdir -p -m 700 "$run"
+        key=$(printf '%s %s' "$src" "$(stat -c %Y "$src" 2>/dev/null)" | md5sum | cut -c1-16)
+        out="$run/cover-$key.png"
+        if [[ ! -f "$out" ]]; then
+            find "$run" -name 'cover-*.png' -delete 2>/dev/null
+            prlimit --as=536870912 --cpu=10 -- magick "$src[0]" -auto-orient -thumbnail '512x512>' -strip "PNG32:$out" 2>/dev/null || exit 0
+        fi
+        echo "$out"
+        ;;
+esac
