@@ -144,7 +144,7 @@ rm -rf "$_qs"
 mv "$_qs_new" "$_qs"
 # Clipboard capture helper is invoked by wl-paste; keep it executable here and
 # in the skel copy (archiso strips modes, so customize_airootfs.sh repeats it).
-chmod 755 "$TARGET/.config/quickshell/clipboard/capture.sh" 2>/dev/null || true
+chmod 755 "$TARGET/.config/quickshell/plugins/clipboard/capture.sh" 2>/dev/null || true
 info "shell -> $TARGET/.config/quickshell"
 
 # 2. Desktop config tree. Generated colour files are only installed on a
