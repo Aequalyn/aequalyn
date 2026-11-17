@@ -177,10 +177,6 @@ hl.bind(M .. " + SHIFT + ESCAPE", hl.dsp.exec_cmd("qs ipc call sysmon toggle")) 
 hl.bind(M .. " + ALT + X",        hl.dsp.exec_cmd("qs ipc call screenText capture"))  -- Copy text from the screen
 hl.bind(M .. " + ALT + T",        hl.dsp.exec_cmd("qs ipc call timer toggle"))        -- Timer
 hl.bind(M .. " + ALT + F",        hl.dsp.exec_cmd("qs ipc call focus toggle"))        -- Focus
-hl.bind(M .. " + ALT + SPACE",    hl.dsp.exec_cmd("qs ipc call aiAsk toggle"))        -- AI ask
-hl.bind(M .. " + ALT + E",        hl.dsp.exec_cmd("qs ipc call aiCommand toggle"))    -- AI command
-hl.bind(M .. " + ALT + V",        hl.dsp.exec_cmd("qs ipc call aiClipboard toggle"))  -- AI clipboard
-hl.bind(M .. " + ALT + D",        hl.dsp.exec_cmd("qs ipc call aiTidy toggle"))       -- AI tidy
 
 -- Focus / move
 -- Super + arrows (focus) and Super + Shift + arrows (swap): aequalyn/keys.lua
