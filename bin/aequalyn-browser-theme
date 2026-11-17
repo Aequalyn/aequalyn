@@ -2,21 +2,26 @@
 # aequalyn-browser-theme -- let Chromium-based browsers use the Aequalyn bar colour.
 #
 # Usage:
-#   aequalyn-browser-theme sync [--color '#rrggbb']   write the policy if the setting is on
-#   aequalyn-browser-theme on [--prompt]              turn it on now
-#   aequalyn-browser-theme off [--prompt]             turn it off (remove the policy)
+#   aequalyn-browser-theme sync [--color '#rrggbb']   publish if the setting is on
+#   aequalyn-browser-theme on [--color '#rrggbb']     publish now
+#   aequalyn-browser-theme off                        remove the policy
 #
 # Chromium only reads its frame colour from a system-wide managed policy, so the
-# bar's base colour (bgBase) is published as BrowserThemeColor there.
-# No BrowserColorScheme key: it is not a valid Chromium policy (browsers report
-# it as an error) and the theme colour works on its own. One sudo authorisation
-# is needed; --prompt offers a GUI prompt the first time and installs a narrow,
-# passwordless rule for later calls.
+# bar's base colour (bgBase) is published as BrowserThemeColor there. No
+# BrowserColorScheme key: it is not a valid Chromium policy (browsers report it
+# as an error) and the colour works on its own.
+#
+# AUTHORISATION: this script NEVER writes a sudoers file and never grants any
+# passwordless sudo. Privileged writes go through pkexec, which uses the session's
+# GUI PolicyKit agent. If pkexec is unavailable, it falls back to sudo -A with
+# aequalyn-askpass (the Aequalyn GUI password prompt). A prompt appears only when
+# the policy actually needs to change; repeated syncs with the same colour do
+# nothing and do not ask again.
 
 set -uo pipefail
 
 SETTINGS="${XDG_CONFIG_HOME:-$HOME/.config}/aequalyn/settings.json"
-# Prefer the themed prompt; fall back to any askpass-capable GUI helper.
+# GUI prompt for the sudo fallback (pkexec uses the polkit agent instead).
 if command -v zenity >/dev/null 2>&1 && command -v aequalyn-askpass >/dev/null 2>&1; then
     ASKPASS=$(command -v aequalyn-askpass)
 else
@@ -56,13 +61,12 @@ fi
 
 # ---- user half --------------------------------------------------------------
 action="${1:-sync}"; shift || true
-prompt=0
 color=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --prompt) prompt=1; shift ;;
-        --color)  color="${2:-}"; shift 2 ;;
-        *)        shift ;;
+        --color) color="${2:-}"; shift 2 ;;
+        --prompt) shift ;;   # kept for compatibility; always interactive now
+        *) shift ;;
     esac
 done
 
@@ -96,9 +100,7 @@ current_color() {
 policy_dirs() {
     local dirs=() dir
     # Every Chromium-style managed-policy directory that exists on this machine
-    # gets color.json -- not just the browsers we can find on PATH. This covers
-    # Chrome, Chromium, Edge, Brave, Vivaldi, Opera and any other derivative,
-    # including ones installed later or as Flatpak-style wrapper packages.
+    # gets color.json -- Chrome, Chromium, Edge, Brave, Vivaldi, Opera, etc.
     while IFS= read -r dir; do
         [[ -n $dir ]] && dirs+=("$dir")
     done < <(find /etc -type d -path '*/policies/managed' -print 2>/dev/null | sort -u)
@@ -128,40 +130,39 @@ policy_dirs() {
     printf '%s\n' "${dirs[@]}"
 }
 
-# sudo_run <allow-prompt> <command...>
-# Try the command passwordlessly first. Testing `sudo -n true` is wrong: a user
-# with no passwordless rights fails that while still being allowed to run the
-# exact command our narrow rule grants. Only the explicit on/off actions (and an
-# explicit --prompt) allow the GUI askpass, so startup/theme-change syncs never
-# pop a dialog unexpectedly.
-sudo_run() {
-    local allow=$1; shift
-    if sudo -n "$@" 2>/dev/null; then
-        return 0
-    fi
-    if [[ $allow -eq 1 && -n $ASKPASS ]]; then
-        SUDO_ASKPASS="$ASKPASS" sudo -A "$@" 2>/dev/null
+# Authorise a privileged command with a GUI prompt. No sudoers rules are ever
+# created: pkexec uses the session's PolicyKit agent; sudo -A uses aequalyn-askpass.
+authorize_root() {
+    if command -v pkexec >/dev/null 2>&1; then
+        pkexec "$@"
         return $?
     fi
-    [[ $allow -eq 1 && -z $ASKPASS ]] && log "no GUI password prompt found; install zenity or aequalyn-askpass"
+    if [[ -n $ASKPASS ]]; then
+        SUDO_ASKPASS="$ASKPASS" sudo -A "$@"
+        return $?
+    fi
+    log "no GUI authorisation available (need pkexec or aequalyn-askpass)"
     return 1
 }
 
-ensure_rule() {
-    local rule=/etc/sudoers.d/aequalyn-browser-theme
-    local user; user=$(id -un)
-    local content
-    content=$(printf '%s\n' \
-        "# Aequalyn browser theming: let the shell update Chromium's managed policy." \
-        "$user ALL=(root) NOPASSWD: $SELF --root write *" \
-        "$user ALL=(root) NOPASSWD: $SELF --root remove *")
-    # The one step that can need a password: `install -m 440` both writes and
-    # sets the mode, so a non-passwordless user sees the askpass dialog once.
-    printf '%s\n' "$content" | sudo_run 1 install -m 440 /dev/stdin "$rule" >/dev/null 2>&1 || return 1
-}
+write_policy() { authorize_root "$SELF" --root write "$color" "${dirs[@]}"; }
+remove_policy() { authorize_root "$SELF" --root remove "${dirs[@]}"; }
 
-write_policy() { sudo_run "$1" "$SELF" --root write "$color" "${dirs[@]}"; }
-remove_policy() { sudo_run "$1" "$SELF" --root remove "${dirs[@]}"; }
+# Skip the prompt when every policy file already holds the requested colour.
+policy_has() {
+    local want=$1 dir n=0
+    for dir in "${dirs[@]}"; do
+        [[ -f "$dir/color.json" ]] || return 1
+        grep -q "\"BrowserThemeColor\": \"$want\"" "$dir/color.json" 2>/dev/null || return 1
+        n=$((n + 1))
+    done
+    [[ $n -gt 0 ]]
+}
+policy_any() {
+    local dir
+    for dir in "${dirs[@]}"; do [[ -f "$dir/color.json" ]] && return 0; done
+    return 1
+}
 
 refresh_browsers() {
     local cmd
@@ -182,25 +183,20 @@ case "$action" in
         enabled=$(jq -r '.appearance.themeBrowser // false' "$SETTINGS" 2>/dev/null || echo false)
         [[ $enabled == true ]] || exit 0
         [[ -n $color ]] || color=$(current_color)
-        # Startup and theme changes: never prompt, only use an existing grant.
-        write_policy "$prompt" || true
+        policy_has "$color" && exit 0
+        write_policy || true
         ;;
     on)
         [[ -n $color ]] || color=$(current_color)
-        # Explicit toggle: try silently, then ask once and install the rule.
-        if ! write_policy 0; then
-            ensure_rule || true
-            write_policy 1 || true
-        fi
+        policy_has "$color" && exit 0
+        write_policy || true
         ;;
     off)
-        if ! remove_policy 0; then
-            ensure_rule || true
-            remove_policy 1 || true
-        fi
+        policy_any || exit 0
+        remove_policy || true
         ;;
     *)
-        log "usage: $0 {sync|on|off} [--color '#rrggbb'] [--prompt]"
+        log "usage: $0 {sync|on|off} [--color '#rrggbb']"
         exit 2
         ;;
 esac
