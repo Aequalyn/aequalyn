@@ -1,0 +1,91 @@
+#!/bin/bash
+# aequalyn-lockscreen: how the screen looks while it is locked (hyprlock), one of the
+# ready-made designs in ~/.config/hypr/lockscreens, drawn in the current theme's colours
+# over the current wallpaper.
+#
+#   aequalyn-lockscreen list            the designs
+#   aequalyn-lockscreen apply [name]    write ~/.config/hypr/hyprlock.conf from the one
+#                                       chosen in Settings (or `name`); "classic" is the
+#                                       one made from the wallpaper
+#   aequalyn-lockscreen try <name>      lock now with that design, to see it
+#
+# The colours come from ~/.config/aequalyn/lock-palette.json, which the shell writes
+# whenever the theme changes; the wallpaper from the lock screen in place.
+set -euo pipefail
+
+CONF="${XDG_CONFIG_HOME:-$HOME/.config}"
+DIR="$CONF/hypr/lockscreens"
+OUT="$CONF/hypr/hyprlock.conf"
+PALETTE="$CONF/aequalyn/lock-palette.json"
+SETTINGS="$CONF/aequalyn/settings.json"
+
+chosen() {
+    local s=""
+    [[ -f "$SETTINGS" ]] && s=$(jq -r '.power.lockStyle // empty' "$SETTINGS" 2>/dev/null || true)
+    echo "${s:-classic}"
+}
+
+# a palette colour as rrggbb, or the fallback
+color() {
+    local v=""
+    [[ -f "$PALETTE" ]] && v=$(jq -r --arg k "$1" '.[$k] // empty' "$PALETTE" 2>/dev/null || true)
+    v=${v#\#}
+    [[ "$v" =~ ^[0-9a-fA-F]{6}$ ]] && echo "${v,,}" || echo "$2"
+}
+
+# the wallpaper the lock screen shows now (kept when the design changes)
+wallpaper() {
+    local p=""
+    [[ -f "$OUT" ]] && p=$(awk '/^[[:space:]]*background[[:space:]]*\{/{b=1} b && /^[[:space:]]*path[[:space:]]*=/{sub(/^[^=]*=[[:space:]]*/,""); print; exit}' "$OUT")
+    [[ -z "$p" && -f "$DIR/.wallpaper" ]] && p=$(cat "$DIR/.wallpaper")
+    echo "$p"
+}
+
+render() {
+    local name=$1 dest=$2 wall
+    wall=$(wallpaper)
+    [[ -n "$wall" ]] && printf '%s' "$wall" > "$DIR/.wallpaper"
+    sed -e "s|{{BG}}|$(color bgBase 141414)|g" \
+        -e "s|{{SURFACE}}|$(color bgSurface 1e1e1e)|g" \
+        -e "s|{{BORDER}}|$(color bgBorder 333333)|g" \
+        -e "s|{{TEXT}}|$(color textPrimary e0e0e0)|g" \
+        -e "s|{{MUTED}}|$(color textMuted 8a8a8a)|g" \
+        -e "s|{{ACCENT}}|$(color accentPrimary 7aa2f7)|g" \
+        -e "s|{{ACCENT2}}|$(color accentCyan 7dcfff)|g" \
+        -e "s|{{RED}}|$(color accentRed f7768e)|g" \
+        -e "s|{{FONT}}|JetBrainsMono Nerd Font|g" \
+        -e "s|{{WALL}}|${wall//|/\\|}|g" \
+        "$DIR/$name.conf" > "$dest"
+}
+
+case "${1:-}" in
+    list)
+        for f in "$DIR"/*.conf; do [[ -e "$f" ]] && basename "$f" .conf; done
+        ;;
+    apply)
+        name=${2:-$(chosen)}
+        # the one made from the wallpaper: kept aside the first time a design replaces it,
+        # put back when "classic" is chosen again
+        if [[ "$name" == classic ]]; then
+            [[ -f "$DIR/.classic" ]] && cp -f "$DIR/.classic" "$OUT"
+            exit 0
+        fi
+        [[ -f "$DIR/.classic" || ! -f "$OUT" ]] || grep -q "^# Aequalyn lock screen: " "$OUT" || cp -f "$OUT" "$DIR/.classic"
+        [[ "$name" =~ ^[a-z0-9-]+$ && -f "$DIR/$name.conf" ]] || { echo "aequalyn-lockscreen: no design '$name'" >&2; exit 1; }
+        tmp=$(mktemp "$OUT.XXXXXX")
+        render "$name" "$tmp"
+        mv -f "$tmp" "$OUT"
+        ;;
+    try)
+        name=${2:-$(chosen)}
+        if [[ "$name" == classic ]]; then exec hyprlock; fi
+        [[ "$name" =~ ^[a-z0-9-]+$ && -f "$DIR/$name.conf" ]] || { echo "aequalyn-lockscreen: no design '$name'" >&2; exit 1; }
+        tmp=$(mktemp "${XDG_RUNTIME_DIR:-/tmp}/aequalyn-lock.XXXXXX")
+        render "$name" "$tmp"
+        pidof hyprlock >/dev/null || hyprlock -c "$tmp"
+        rm -f "$tmp"
+        ;;
+    *)
+        sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+        ;;
+esac

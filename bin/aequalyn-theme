@@ -136,6 +136,14 @@ if [[ -f "$CONF_DIR/hypr/hyprlock.conf" ]]; then
     ' "$CONF_DIR/hypr/hyprlock.conf" > "$tmp_hl" && mv "$tmp_hl" "$CONF_DIR/hypr/hyprlock.conf"
 fi
 
+# The lock screen design chosen in Settings, over what matugen just wrote (that one is
+# kept as the "classic" design)
+if [[ -f "$CONF_DIR/hypr/hyprlock.conf" ]] && command -v aequalyn-lockscreen >/dev/null 2>&1; then
+    mkdir -p "$CONF_DIR/hypr/lockscreens"
+    cp -f "$CONF_DIR/hypr/hyprlock.conf" "$CONF_DIR/hypr/lockscreens/.classic"
+    aequalyn-lockscreen apply || warn "lock screen design not applied"
+fi
+
 # Nautilus/libadwaita palette (live-reloaded by Aequalyn nautilus-python extension)
 if command -v aequalyn-nautilus-palette >/dev/null 2>&1; then
     aequalyn-nautilus-palette >/dev/null 2>&1 || true
