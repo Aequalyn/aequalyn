@@ -4,3 +4,11 @@
 
 # shell is its own repository (aequalyn-shell)
 shell/
+
+# the lock-screen configs generated from the running wallpaper
+# (config/hypr/lockscreens/.classic, .wallpaper, ... -- per-machine state,
+# written there by aequalyn-lockscreen / aequalyn-themes; the templates next
+# to them are what ships)
+config/hypr/lockscreens/.*
+!config/hypr/lockscreens/.*.conf
+
