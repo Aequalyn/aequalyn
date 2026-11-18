@@ -196,10 +196,14 @@ hl.bind(M .. " + mouse_up",   hl.dsp.focus({ workspace = "e-1" }))
 hl.bind(M .. " + mouse:272", hl.dsp.window.drag(),   { mouse = true })
 hl.bind(M .. " + mouse:273", hl.dsp.window.resize(), { mouse = true })
 
--- Screenshots
--- hl.bind(M .. " + PRINT",       hl.dsp.exec_cmd("aequalyn-screenshot full-clip"))
--- hl.bind("PRINT",               hl.dsp.exec_cmd("aequalyn-screenshot region-clip"))
--- hl.bind(M .. " + SHIFT + PRINT", hl.dsp.exec_cmd("aequalyn-screenshot region-file"))
+-- Screenshots and recording: Print, or Super + Ctrl + S on a keyboard without one.
+-- Every screenshot is saved to ~/Pictures/Screenshots; "copied" also puts it on the clipboard.
+hl.bind("PRINT",                   hl.dsp.exec_cmd("aequalyn-screenshot region-clip"))   -- A part, saved and copied
+hl.bind("SHIFT + PRINT",           hl.dsp.exec_cmd("aequalyn-screenshot full-clip"))     -- The whole screen, saved and copied
+hl.bind(M .. " + PRINT",           hl.dsp.exec_cmd("aequalyn-screenshot region-file"))   -- A part, saved only
+hl.bind(M .. " + CTRL + S",        hl.dsp.exec_cmd("aequalyn-screenshot region-clip"))   -- A part, saved and copied
+hl.bind(M .. " + CTRL + SHIFT + S", hl.dsp.exec_cmd("aequalyn-screenshot full-clip"))    -- The whole screen, saved and copied
+hl.bind(M .. " + CTRL + R",        hl.dsp.exec_cmd("aequalyn-record toggle"))            -- Record the screen: start or stop
 hl.bind("XF86SelectiveScreenshot", hl.dsp.exec_cmd("aequalyn-screenshot region-clip"))
 
 -- Media / brightness
