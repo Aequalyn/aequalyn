@@ -232,6 +232,8 @@ remember() { # remember <file>
     printf '%s' "$1" > "$CACHE/current-wallpaper"
     state_set '.current = $f | .lastChange = ($t | tonumber) | .mode = $m' \
         --arg f "$1" --arg t "$(date +%s)" --arg m "$MODE"
+    # the lock screen shows the new wallpaper too, whatever colours are on
+    command -v aequalyn-lockscreen >/dev/null 2>&1 && { aequalyn-lockscreen apply >/dev/null 2>&1 & }
 }
 
 apply() { # apply <file> [--no-palette] [--output NAME]

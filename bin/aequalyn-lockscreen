@@ -10,7 +10,9 @@
 #   aequalyn-lockscreen try <name>      lock now with that design, to see it
 #
 # The colours come from ~/.config/aequalyn/lock-palette.json, which the shell writes
-# whenever the theme changes; the wallpaper from the lock screen in place.
+# whenever the theme changes; the wallpaper is the one on the screen now (a still of it
+# when it moves). aequalyn-wallpaper runs `apply` on every wallpaper change, and the
+# shell on every theme change, so the lock always matches what you chose.
 set -euo pipefail
 
 CONF="${XDG_CONFIG_HOME:-$HOME/.config}"
@@ -33,11 +35,25 @@ color() {
     [[ "$v" =~ ^[0-9a-fA-F]{6}$ ]] && echo "${v,,}" || echo "$2"
 }
 
-# the wallpaper the lock screen shows now (kept when the design changes)
+# the wallpaper on the screen now; a still frame of it when it is a moving one
 wallpaper() {
-    local p=""
-    [[ -f "$OUT" ]] && p=$(awk '/^[[:space:]]*background[[:space:]]*\{/{b=1} b && /^[[:space:]]*path[[:space:]]*=/{sub(/^[^=]*=[[:space:]]*/,""); print; exit}' "$OUT")
-    [[ -z "$p" && -f "$DIR/.wallpaper" ]] && p=$(cat "$DIR/.wallpaper")
+    local p="" cache="${XDG_CACHE_HOME:-$HOME/.cache}/aequalyn/current-wallpaper"
+    [[ -f "$cache" ]] && p=$(cat "$cache")
+    if [[ -n "$p" && -f "$p" && "${p,,}" =~ \.(mp4|webm|mkv|mov)$ ]]; then
+        local run="${XDG_RUNTIME_DIR:-/tmp}/aequalyn-lock" key still
+        mkdir -p -m 700 "$run"
+        key=$(printf '%s' "$p" | md5sum | cut -c1-16)
+        still="$run/wall-$key.jpg"
+        [[ -s "$still" ]] || ffmpeg -nostdin -loglevel error -y -ss 1 -i "$p" -frames:v 1 "$still" >/dev/null 2>&1 \
+            || ffmpeg -nostdin -loglevel error -y -i "$p" -frames:v 1 "$still" >/dev/null 2>&1 || true
+        [[ -s "$still" ]] && p="$still" || p=""
+    fi
+    # nothing known (or it is gone): the one the lock screen had
+    if [[ -z "$p" || ! -f "$p" ]]; then
+        p=""
+        [[ -f "$OUT" ]] && p=$(awk '/^[[:space:]]*background[[:space:]]*\{/{b=1} b && /^[[:space:]]*path[[:space:]]*=/{sub(/^[^=]*=[[:space:]]*/,""); print; exit}' "$OUT")
+        [[ -z "$p" && -f "$DIR/.wallpaper" ]] && p=$(cat "$DIR/.wallpaper")
+    fi
     echo "$p"
 }
 
@@ -64,9 +80,9 @@ case "${1:-}" in
         ;;
     apply)
         name=${2:-$(chosen)}
-        # the one made from the wallpaper: kept aside the first time a design replaces it,
-        # put back when "classic" is chosen again
-        if [[ "$name" == classic ]]; then
+        # Classic: drawn from its own template too when there is one, so its colours and
+        # wallpaper follow the theme; else the one made from the wallpaper, kept aside
+        if [[ "$name" == classic && ! -f "$DIR/classic.conf" ]]; then
             [[ -f "$DIR/.classic" ]] && cp -f "$DIR/.classic" "$OUT"
             exit 0
         fi
@@ -78,7 +94,7 @@ case "${1:-}" in
         ;;
     try)
         name=${2:-$(chosen)}
-        if [[ "$name" == classic ]]; then exec hyprlock; fi
+        if [[ "$name" == classic && ! -f "$DIR/classic.conf" ]]; then exec hyprlock; fi
         [[ "$name" =~ ^[a-z0-9-]+$ && -f "$DIR/$name.conf" ]] || { echo "aequalyn-lockscreen: no design '$name'" >&2; exit 1; }
         tmp=$(mktemp "${XDG_RUNTIME_DIR:-/tmp}/aequalyn-lock.XXXXXX")
         render "$name" "$tmp"
