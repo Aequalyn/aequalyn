@@ -281,6 +281,12 @@ if [[ -n "${THEMES_SRC:-}" && -d "$THEMES_SRC/themes" ]]; then
     mkdir -p "$TARGET/.local/share/aequalyn/themes" "$TARGET/.config/aequalyn/themes"
     cp -r "$THEMES_SRC/themes/." "$TARGET/.local/share/aequalyn/themes/"
     info "themes -> $TARGET/.local/share/aequalyn/themes"
+    # wallpapers of their own, not part of any theme: in every wallpaper picker
+    if [[ -d "$THEMES_SRC/wallpapers" ]]; then
+        mkdir -p "$TARGET/.local/share/aequalyn/wallpapers"
+        cp -r "$THEMES_SRC/wallpapers/." "$TARGET/.local/share/aequalyn/wallpapers/"
+        info "wallpapers -> $TARGET/.local/share/aequalyn/wallpapers"
+    fi
 fi
 
 # 5. A default settings.json if none exists
