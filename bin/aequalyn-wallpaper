@@ -195,7 +195,13 @@ video_frame() { # first good frame of a video -> cached jpg (thumbnail + palette
 
 show_video() { # show_video <file>
     local v=$1 out
-    command -v mpvpaper >/dev/null 2>&1 || die "live wallpapers need mpvpaper (pacman -S mpvpaper)"
+    # without mpvpaper a live wallpaper still shows, as its still frame
+    if ! command -v mpvpaper >/dev/null 2>&1; then
+        warn "live wallpapers move with mpvpaper (pacman -S mpvpaper); showing a still of it"
+        local still; still=$(video_frame "$v" || true)
+        [[ -n "$still" ]] && { show_image "$still"; return 0; }
+        die "live wallpapers need mpvpaper (pacman -S mpvpaper)"
+    fi
     stop_live
     local opts
     opts=$(setting .wallpaper.liveOptions "no-audio loop panscan=1.0 hwdec=auto")
@@ -343,7 +349,7 @@ list_cmd() {
     done
     local files
     if [[ $want_all -eq 1 ]]; then
-        files=$( { media_in "$FOLDER"; media_in "$HOME/Pictures/Wallpapers"; theme_backgrounds; media_in "$DATA/generated" "$IMAGE_RE"; } | awk '!seen[$0]++')
+        files=$( { media_in "$FOLDER"; media_in "$HOME/Pictures/Wallpapers"; theme_backgrounds; media_in "$DATA/wallpapers"; media_in "$DATA/generated" "$IMAGE_RE"; } | awk '!seen[$0]++')
     else
         files=$(pool)
     fi
