@@ -2,14 +2,14 @@
 -- Override anything here in ~/.config/hypr/aequalyn/user.lua (loaded last).
 hl.config({
     general = {
-        gaps_in = 5,
+        gaps_in = 6,
         gaps_out = 10,
         border_size = 2,
         layout = "dwindle",
     },
 
     decoration = {
-        rounding = 12,
+        rounding = 9,
         active_opacity = 1,
         inactive_opacity = 0.95,
 
