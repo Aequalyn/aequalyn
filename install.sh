@@ -175,6 +175,20 @@ for dir in hypr kitty foot fuzzel qt6ct gtk-3.0 gtk-4.0 btop matugen fastfetch a
         fi
         continue
     fi
+    # The Hyprland config ships as one folder: hyprland.lua includes the
+    # sections next to it and the modules under aequalyn/, and the repo carries
+    # the generated files too (monitors.lua, webapps.lua, look.lua, colors.lua,
+    # ...) as the defaults. So whenever it is installed at all -- a fresh home,
+    # --skel, --with-hypr or --force -- the whole folder is replaced, and what
+    # ships is exactly what runs. Updates without those flags leave the user's
+    # hypr alone (the skip above); switching existing installs over is a job
+    # for migrations/, not for install.sh.
+    if [[ "$dir" == hypr ]]; then
+        rm -rf "$dst"
+        mkdir -p "$(dirname "$dst")"
+        cp -r "$src" "$dst"
+        continue
+    fi
     if [[ -d "$src" ]]; then
         mkdir -p "$dst"
         for f in "$src"/* "$src"/.[!.]*; do
