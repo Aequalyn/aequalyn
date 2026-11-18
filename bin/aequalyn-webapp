@@ -603,14 +603,43 @@ def icon_dirs_for(ext: str) -> Path:
     return SCALABLE_ICON_DIR if ext in ("svg",) else ICON_DIR
 
 
+def as_png(data: bytes) -> bytes:
+    """A picture an icon theme won't read (jpg, gif, webp, ico) as a PNG of at most
+    256 by 256, through ImageMagick; b"" when it can't be made."""
+    tool = "magick" if have("magick") else ("convert" if have("convert") else "")
+    if not tool:
+        return b""
+    try:
+        r = subprocess.run([tool, "-", "-background", "none", "-flatten", "-resize", "256x256>", "png:-"],
+                           input=data, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return b""
+    out = r.stdout if r.returncode == 0 else b""
+    return out if out[:8] == b"\x89PNG\r\n\x1a\n" else b""
+
+
 def save_icon_bytes(slug: str, data: bytes) -> str:
     ext = sniff_extension(data)
     if not ext:
         return ""
+    # icon themes (and so the docks, the launcher and the bar) read only PNG and SVG
+    if ext not in ("png", "svg"):
+        data = as_png(data)
+        if not data:
+            return ""
+        ext = "png"
     target = icon_dirs_for(ext) / f"{DESKTOP_PREFIX}{slug}.{ext}"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(data)
     os.chmod(target, 0o644)
+    # an older copy in another format would be found first, or never: drop it
+    for d in (ICON_DIR, SCALABLE_ICON_DIR):
+        for old in d.glob(f"{DESKTOP_PREFIX}{slug}.*"):
+            if old != target:
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
     return f"{DESKTOP_PREFIX}{slug}"
 
 
