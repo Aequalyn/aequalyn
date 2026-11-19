@@ -97,6 +97,10 @@ post_submit = START_BAR_ON_SPLASH;   # the boot bar is running
 post_submit_frames = 0;   # frames since that answer
 progress_px = 0;
 mode = Plymouth.GetMode();
+# shutting down or restarting: the mark alone, no loader ring and no bar
+logo_only = 0;
+if (mode == "shutdown" || mode == "reboot") logo_only = 1;
+if (logo_only == 1) post_submit = 0;
 
 # ---- Sprites -----------------------------------------------------------------
 logo_sprite = Sprite(logo_img);
@@ -370,15 +374,22 @@ fun refresh_callback() {
         }
     }
 
-    # shutdown/reboot: fade logo out slowly
-    if (mode == "shutdown" || mode == "reboot") {
-        # reduce spinner, pulse logo
-        ring_spinner_sprite.SetOpacity(0.3);
+    # shutdown/reboot: only the mark (it keeps its slow pulse)
+    if (logo_only == 1) {
+        ring_track_sprite.SetOpacity(0);
+        ring_spinner_sprite.SetOpacity(0);
+        pbar_sprite.SetOpacity(0);
+        pbox_sprite.SetOpacity(0);
     }
 }
 
 Plymouth.SetRefreshFunction(refresh_callback);
 
-# initial opacity for track/spinner
-ring_track_sprite.SetOpacity(0.5);
-ring_spinner_sprite.SetOpacity(0.9);
+# initial opacity for track/spinner (none when shutting down or restarting)
+if (logo_only == 1) {
+    ring_track_sprite.SetOpacity(0);
+    ring_spinner_sprite.SetOpacity(0);
+} else {
+    ring_track_sprite.SetOpacity(0.5);
+    ring_spinner_sprite.SetOpacity(0.9);
+}
