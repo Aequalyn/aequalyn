@@ -23,13 +23,6 @@ START_BAR_ON_SPLASH = 0;
 Window.SetBackgroundTopColor(0.0784, 0.1647, 0.1882);
 Window.SetBackgroundBottomColor(0.0784, 0.1647, 0.1882);
 
-# ---- Scaling -----------------------------------------------------------------
-screen_w = Window.GetWidth();
-screen_h = Window.GetHeight();
-scale = Math.Min(screen_w, screen_h) / 1080.0;
-if (scale < 0.55) scale = 0.55;
-if (scale > 2.5) scale = 2.5;
-
 # ---- Load base images --------------------------------------------------------
 logo_base = Image("logo.png");
 ring_track_base = Image("track.png");
@@ -42,37 +35,54 @@ bullet_base = Image("bullet.png");
 pbox_base = Image("progress_box.png");
 pbar_base = Image("progress_bar.png");
 
-# ---- Scale images ------------------------------------------------------------
-logo_size = Math.Int(180 * scale);
-logo_img = logo_base.Scale(logo_size, logo_size);
+# ---- Scaling -----------------------------------------------------------------
+# Worked out from the screen's size, and again whenever that changes: on hybrid
+# graphics (and whenever the firmware's framebuffer hands over to the real GPU
+# driver) the screen changes resolution while the splash is up, and a layout made
+# for the old size left the mark off centre.
+fun relayout() {
+    global.screen_w = Window.GetWidth();
+    global.screen_h = Window.GetHeight();
+    s = Math.Min(global.screen_w, global.screen_h) / 1080.0;
+    if (s < 0.55) s = 0.55;
+    if (s > 2.5) s = 2.5;
+    global.scale = s;
 
-ring_size = Math.Int(230 * scale);
-ring_track_img = ring_track_base.Scale(ring_size, ring_size);
-ring_spinner_img = ring_spinner_base.Scale(ring_size, ring_size);
+    global.logo_size = Math.Int(180 * s);
+    global.logo_img = logo_base.Scale(global.logo_size, global.logo_size);
 
-box_w = Math.Int(box_base.GetWidth() * scale);
-box_h = Math.Int(box_base.GetHeight() * scale);
-box_img = box_base.Scale(box_w, box_h);
+    global.ring_size = Math.Int(230 * s);
+    global.ring_track_img = ring_track_base.Scale(global.ring_size, global.ring_size);
+    global.ring_spinner_img = ring_spinner_base.Scale(global.ring_size, global.ring_size);
 
-lock_w = Math.Int(lock_base.GetWidth() * scale);
-lock_h = Math.Int(lock_base.GetHeight() * scale);
-lock_img = lock_base.Scale(lock_w, lock_h);
+    global.box_w = Math.Int(box_base.GetWidth() * s);
+    global.box_h = Math.Int(box_base.GetHeight() * s);
+    global.box_img = box_base.Scale(global.box_w, global.box_h);
 
-entry_w = Math.Int(entry_base.GetWidth() * scale);
-entry_h = Math.Int(entry_base.GetHeight() * scale);
-entry_img = entry_base.Scale(entry_w, entry_h);
-entry_error_img = entry_error_base.Scale(entry_w, entry_h);
+    global.lock_w = Math.Int(lock_base.GetWidth() * s);
+    global.lock_h = Math.Int(lock_base.GetHeight() * s);
+    global.lock_img = lock_base.Scale(global.lock_w, global.lock_h);
 
-bullet_w = Math.Int(bullet_base.GetWidth() * scale);
-bullet_h = Math.Int(bullet_base.GetHeight() * scale);
-bullet_img = bullet_base.Scale(bullet_w, bullet_h);
+    global.entry_w = Math.Int(entry_base.GetWidth() * s);
+    global.entry_h = Math.Int(entry_base.GetHeight() * s);
+    global.entry_img = entry_base.Scale(global.entry_w, global.entry_h);
+    global.entry_error_img = entry_error_base.Scale(global.entry_w, global.entry_h);
 
-pbox_w = Math.Int(pbox_base.GetWidth() * scale);
-pbox_h = Math.Int(pbox_base.GetHeight() * scale);
-pbox_img = pbox_base.Scale(pbox_w, pbox_h);
+    global.bullet_w = Math.Int(bullet_base.GetWidth() * s);
+    global.bullet_h = Math.Int(bullet_base.GetHeight() * s);
+    global.bullet_img = bullet_base.Scale(global.bullet_w, global.bullet_h);
 
-pbar_h = Math.Int(pbar_base.GetHeight() * scale);
-pbar_base_scaled = pbar_base.Scale(Math.Int(pbar_base.GetWidth() * scale), pbar_h);
+    global.pbox_w = Math.Int(pbox_base.GetWidth() * s);
+    global.pbox_h = Math.Int(pbox_base.GetHeight() * s);
+    global.pbox_img = pbox_base.Scale(global.pbox_w, global.pbox_h);
+
+    global.pbar_h = Math.Int(pbar_base.GetHeight() * s);
+    global.pbar_base_scaled = pbar_base.Scale(Math.Int(pbar_base.GetWidth() * s), global.pbar_h);
+
+    global.cx = Window.GetX() + global.screen_w / 2;
+    global.cy = Window.GetY() + global.screen_h / 2;
+}
+relayout();
 
 # ---- State -------------------------------------------------------------------
 status = "normal";
@@ -95,13 +105,7 @@ logo_sprite.SetOpacity(1);
 ring_track_sprite = Sprite(ring_track_img);
 ring_spinner_sprite = Sprite(ring_spinner_img);
 
-# positions
-cx = Window.GetX() + screen_w / 2;
-cy = Window.GetY() + screen_h / 2;
-
-logo_sprite.SetPosition(cx - logo_size / 2, cy - logo_size / 2, 5);
-ring_track_sprite.SetPosition(cx - ring_size / 2, cy - ring_size / 2, 4);
-ring_spinner_sprite.SetPosition(cx - ring_size / 2, cy - ring_size / 2, 6);
+# (positioned by place(), below)
 
 # dialog (lazy)
 dialog = 0;
@@ -118,26 +122,37 @@ fun dialog_setup() {
     dl = Sprite(lock_img);
     de = Sprite(entry_img);
 
-    # the dialog sits directly underneath the mark, horizontally centred
-    content_w = lock_w + Math.Int(12 * scale) + entry_w;
-    dbx = cx - box_w / 2;
-    dby = cy + ring_size / 2 + Math.Int(34 * scale);
-    db.SetPosition(dbx, dby, 10000);
-
-    dlx = cx - content_w / 2;
-    dly = dby + box_h / 2 - lock_h / 2;
-    dl.SetPosition(dlx, dly, 10001);
-
-    dex = dlx + lock_w + Math.Int(12 * scale);
-    dey = dby + box_h / 2 - entry_h / 2;
-    de.SetPosition(dex, dey, 10001);
-
     global.dialog_box = db;
     global.dialog_lock = dl;
     global.dialog_entry = de;
-    global.dialog_y = dby;
     global.dialog = 1;
     global.dialog_bullets = [];
+    dialog_place();
+}
+
+# the dialog sits directly underneath the mark, horizontally centred
+fun dialog_place() {
+    if (dialog == 0) return;
+    dialog_box.SetImage(box_img);
+    dialog_lock.SetImage(lock_img);
+    if (global.retry == 1) dialog_entry.SetImage(entry_error_img);
+    else dialog_entry.SetImage(entry_img);
+
+    content_w = lock_w + Math.Int(12 * scale) + entry_w;
+    dby = cy + ring_size / 2 + Math.Int(34 * scale);
+    dialog_box.SetPosition(cx - box_w / 2, dby, 10000);
+    dlx = cx - content_w / 2;
+    dialog_lock.SetPosition(dlx, dby + box_h / 2 - lock_h / 2, 10001);
+    dex = dlx + lock_w + Math.Int(12 * scale);
+    dialog_entry.SetPosition(dex, dby + box_h / 2 - entry_h / 2, 10001);
+    global.dialog_y = dby;
+
+    for (i = 0; dialog_bullets[i]; i++) {
+        bsx = dex + Math.Int(10 * scale) + i * (bullet_w + Math.Int(4 * scale));
+        bsy = dby + box_h / 2 - entry_h / 2 + entry_h / 2 - bullet_h / 2;
+        dialog_bullets[i].sprite.SetImage(bullet_img);
+        dialog_bullets[i].sprite.SetPosition(bsx, bsy, 10002);
+    }
 }
 
 fun dialog_opacity(op) {
@@ -233,13 +248,24 @@ pbar_sprite = Sprite();
 pbox_sprite.SetOpacity(0);
 pbar_sprite.SetOpacity(0);
 
-pbox_x = cx - pbox_w / 2;
-pbox_y = cy + Math.Int(120 * scale);
-pbox_sprite.SetPosition(pbox_x, pbox_y, 10);
+# Every sprite where the current layout puts it, at its current size.
+fun place() {
+    logo_sprite.SetImage(logo_img);
+    ring_track_sprite.SetImage(ring_track_img);
+    logo_sprite.SetPosition(cx - logo_size / 2, cy - logo_size / 2, 5);
+    ring_track_sprite.SetPosition(cx - ring_size / 2, cy - ring_size / 2, 4);
+    ring_spinner_sprite.SetPosition(cx - ring_size / 2, cy - ring_size / 2, 6);
 
-pbar_x = cx - pbar_base_scaled.GetWidth() / 2;
-pbar_y = pbox_y + (pbox_h - pbar_h) / 2;
-pbar_sprite.SetPosition(pbar_x, pbar_y, 11);
+    pbox_sprite.SetImage(pbox_img);
+    pbox_y = cy + Math.Int(120 * scale);
+    pbox_sprite.SetPosition(cx - pbox_w / 2, pbox_y, 10);
+    pbar_sprite.SetPosition(cx - pbar_base_scaled.GetWidth() / 2, pbox_y + (pbox_h - pbar_h) / 2, 11);
+    # the bar's image is redrawn at the new width on the next frame
+    global.progress_px = 0;
+
+    dialog_place();
+}
+place();
 
 # The bar is driven by BOOT_SECONDS from the password answer in
 # refresh_callback(); Plymouth's own boot-progress updates are not usable here
@@ -262,6 +288,11 @@ Plymouth.SetQuitFunction(quit_callback);
 
 # ---- Refresh -----------------------------------------------------------------
 fun refresh_callback() {
+    if (Window.GetWidth() != screen_w || Window.GetHeight() != screen_h) {
+        relayout();
+        place();
+    }
+
     # the loader only turns once a password has been submitted
     if (global.status != "password") {
         global.spinner_angle += SPINNER_STEP;
