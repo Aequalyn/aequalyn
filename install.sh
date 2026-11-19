@@ -309,31 +309,13 @@ if [[ ! -f "$TARGET/.config/aequalyn/settings.json" ]]; then
     cp "$ROOT/config/aequalyn/settings.json" "$TARGET/.config/aequalyn/settings.json"
 fi
 
-# 6. Desktop entry for the installer (live session convenience).
-# Only created on the live ISO (/etc/skel) and not on a real target home,
-# so it doesn't linger after install. Skip on --skel (the ISO image carries
-# its own copy in /usr/share/applications).
-if [[ $SKEL -eq 1 ]]; then
-    # issue 1: the live ISO keeps the "Install Aequalyn" launcher in
-    # /etc/skel so the live session can start the installer from the menu.
-    mkdir -p "$TARGET/.local/share/applications"
-    cat > "$TARGET/.local/share/applications/aequalyn-install.desktop" <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Install Aequalyn
-Comment=Install Aequalyn to this machine
-Exec=sudo aequalyn-install
-Icon=aequalyn-install
-Terminal=false
-Categories=System;
-EOF
-else
-    # issue 1: a real install targets a user's home, not /etc/skel, so the
-    # installer's desktop entry must never be created there -- and a stale
-    # one left by an older/live install is removed so it doesn't linger
-    # in ~/.local/share/applications after install.
-    rm -f "$TARGET/.local/share/applications/aequalyn-install.desktop"
-fi
+# 6. The installer's desktop entry is the live ISO's alone: the ISO ships it
+# in /usr/share/applications, next to its icon (aequalyn-mark-dark). No copy
+# is made here -- one in /etc/skel would shadow the ISO's own entry for the
+# live user, naming an icon no theme carries, so the dock would show the
+# launcher with no picture, and one left in a real home would linger after
+# install. Anything a previous run left is removed.
+rm -f "$TARGET/.local/share/applications/aequalyn-install.desktop"
 
 # 7. Nautilus palette extension (live-reloaded by Aequalyn theme tools)
 if [[ -f "$ROOT/config/nautilus-python/extensions/aequalyn_palette.py" ]]; then
