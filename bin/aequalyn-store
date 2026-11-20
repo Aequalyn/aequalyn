@@ -7,6 +7,7 @@
   aequalyn-store update  <kind> <id>
   aequalyn-store remove  <kind> <id>
   aequalyn-store list    [<kind>] [--json]
+  aequalyn-store update-all
   aequalyn-store apply-look <id> [--piece all|bar|dock|cursor|lock|sleep|sddm]
 
   kinds: plugin, theme, cursor, wallpaper, look
@@ -599,6 +600,18 @@ def main(argv):
         if kind and kind not in KINDS:
             raise Fail(f"unknown kind: {kind}")
         do_list(kind, "--json" in switches)
+        return 0
+    if cmd == "update-all":
+        failed = []
+        for rec in list(db_load().values()):
+            try:
+                step(f"Updating {rec['kind']} '{rec['id']}'")
+                do_update(rec["kind"], rec["id"])
+            except Fail as e:
+                say(f"FAIL {rec['id']}: {e}")
+                failed.append(rec["id"])
+        if failed:
+            raise Fail("not updated: " + ", ".join(failed) + " (each keeps what it had)")
         return 0
     if cmd == "apply-look":
         if len(args) != 2:
