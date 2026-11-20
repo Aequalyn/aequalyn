@@ -11,6 +11,10 @@
   aequalyn-store refresh                  fetch the Market's catalog (checked against its sha256)
   aequalyn-store market [--json]          the catalog, each item with its state here
   aequalyn-store install-market <id>      install a catalog item at the commit it was approved at
+  aequalyn-store search-apps [<words>] [--page <n>]
+                                          apps from Arch, the AUR, Flathub and Snap, as JSON
+                                          (no words: Flathub's most installed, page by page,
+                                          and Snap's featured)
   aequalyn-store apply-look <id> [--piece all|bar|dock|cursor|lock|sleep|sddm]
 
   kinds: plugin, theme, cursor, wallpaper, look
@@ -636,13 +640,93 @@ def do_install_market(ident):
     do_install(it["kind"], it["repo"], it["commit"])
 
 
+# ---- apps from every backend ------------------------------------------------------------------
+PKG_RE = re.compile(r"^[A-Za-z0-9@._+-]{1,128}$")
+
+
+def http_json(url, data=None, headers=None):
+    import urllib.request
+    req = urllib.request.Request(url, data=json.dumps(data).encode() if data is not None else None,
+                                 headers=dict({"User-Agent": "aequalyn-store", "Content-Type": "application/json"}, **(headers or {})))
+    with urllib.request.urlopen(req, timeout=12) as r:
+        return json.loads(r.read().decode())
+
+
+def search_arch(q):
+    if not q or not shutil.which("pacman"):
+        return []
+    out, cur = [], None
+    for line in run(["pacman", "-Ss", "--", q]).stdout.splitlines():
+        if not line.startswith(" "):
+            m = re.match(r"^(\S+)/(\S+) (\S+)", line)
+            cur = {"source": "Arch", "id": m.group(2), "name": m.group(2), "version": m.group(3),
+                   "about": "", "icon": "", "popularity": 0} if m else None
+            if cur:
+                out.append(cur)
+        elif cur:
+            cur["about"] = line.strip()
+    return out[:60]
+
+
+def search_aur(q):
+    if len(q) < 2:
+        return []
+    from urllib.parse import quote
+    d = http_json("https://aur.archlinux.org/rpc/v5/search/" + quote(q) + "?by=name-desc")
+    res = sorted(d.get("results", []), key=lambda r: -(r.get("Popularity") or 0))[:40]
+    return [{"source": "AUR", "id": r["Name"], "name": r["Name"], "version": r.get("Version", ""),
+             "about": r.get("Description") or "", "icon": "", "popularity": r.get("NumVotes", 0)} for r in res]
+
+
+def search_flathub(q, page):
+    d = http_json("https://flathub.org/api/v2/search", {"query": q, "hitsPerPage": 40, "page": page})
+    return [{"source": "Flatpak", "id": h["app_id"], "name": h.get("name", h["app_id"]),
+             "about": h.get("summary") or "", "icon": h.get("icon") or "",
+             "popularity": h.get("installs_last_month") or 0} for h in d.get("hits", [])], d.get("totalPages", 1)
+
+
+def search_snap(q):
+    from urllib.parse import quote
+    url = "https://api.snapcraft.io/v2/snaps/find?fields=title,summary,media&" + ("q=" + quote(q) if q else "category=featured")
+    d = http_json(url, headers={"Snap-Device-Series": "16"})
+    out = []
+    for r in d.get("results", [])[:40]:
+        sn = r.get("snap", {})
+        icon = next((m["url"] for m in sn.get("media", []) if m.get("type") == "icon"), "")
+        out.append({"source": "Snap", "id": r["name"], "name": sn.get("title") or r["name"],
+                    "about": sn.get("summary") or "", "icon": icon, "popularity": 0})
+    return out
+
+
+def do_search_apps(q, page):
+    from concurrent.futures import ThreadPoolExecutor
+    q = q.strip()[:80]
+    jobs = {"Flatpak": lambda: search_flathub(q, page)}
+    if page == 1:
+        jobs.update({"Arch": lambda: search_arch(q), "AUR": lambda: search_aur(q), "Snap": lambda: search_snap(q)})
+    results, errors, pages = [], {}, 1
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        futs = {k: ex.submit(f) for k, f in jobs.items()}
+        for k, f in futs.items():
+            try:
+                r = f.result()
+                if k == "Flatpak":
+                    r, pages = r
+                results += r
+            except Exception as e:
+                errors[k] = str(e)[:120]
+    # only names that are safe to hand to pacman, yay, flatpak and snap
+    results = [r for r in results if PKG_RE.match(r["id"])]
+    print(json.dumps({"query": q, "page": page, "flathubPages": pages, "errors": errors, "results": results}))
+
+
 def main(argv):
     args = list(argv)
     if not args or args[0] in ("-h", "--help", "help"):
         print(__doc__.strip())
         return 0
     flags = {}
-    for f in ("--at", "--piece"):
+    for f in ("--at", "--piece", "--page"):
         if f in args:
             i = args.index(f)
             if i + 1 >= len(args):
@@ -661,6 +745,10 @@ def main(argv):
         if kind and kind not in KINDS:
             raise Fail(f"unknown kind: {kind}")
         do_list(kind, "--json" in switches)
+        return 0
+    if cmd == "search-apps":
+        page = int(flags.get("--page", "1")) if flags.get("--page", "1").isdigit() else 1
+        do_search_apps(" ".join(args[1:]), max(1, min(page, 500)))
         return 0
     if cmd == "refresh":
         do_refresh()
