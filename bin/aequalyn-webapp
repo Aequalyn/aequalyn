@@ -53,6 +53,7 @@ it (used by the tests).
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -650,7 +651,10 @@ def download_icon(slug: str, url: str) -> str:
     try:
         with urllib.request.urlopen(req, timeout=6) as resp:
             data = resp.read(2_000_000)
-    except (urllib.error.URLError, OSError, ValueError):
+    # http.client.InvalidURL was a ValueError until 3.14, which re-parented it
+    # under HTTPException: catch both, so a malformed URL can never take a
+    # seed or a sync down with it
+    except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException):
         return ""
     if len(data) < 64:
         return ""
@@ -675,7 +679,10 @@ def fetch_dashboard_icon(slug: str, name: str, url: str) -> str:
     """Try to pull an icon from dashboardicons.com (homarr-labs/dashboard-icons)."""
     names = []
     seen = set()
-    for cand in (slug, name.strip().lower(), slugify(name)):
+    # the raw display name is not one of dashboardicons' slugs, and one with a
+    # space in it ("youtube music") is not a legal URL path; slugify(name)
+    # already covers the same candidate
+    for cand in (slug, slugify(name)):
         if cand and cand not in seen:
             seen.add(cand)
             names.append(cand)
@@ -692,8 +699,10 @@ def fetch_dashboard_icon(slug: str, name: str, url: str) -> str:
             names.append(h)
     for n in names:
         for fmt in ("png", "svg", "webp"):
+            # quote() is a no-op for every plain slug, and makes a candidate
+            # with a space or any other unsafe byte a legal URL path
             got = download_icon(slug, "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/%s/%s.%s"
-                               % (fmt, n, fmt))
+                               % (fmt, urllib.parse.quote(n, safe=""), fmt))
             if got:
                 return got
     return ""
