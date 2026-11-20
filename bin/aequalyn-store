@@ -42,7 +42,7 @@ KINDS = list(ROOTS)
 SHELL = CONF / "quickshell"
 SETTINGS = CONF / "aequalyn/settings.json"
 MARKET_URL = os.environ.get("AEQUALYN_MARKET_URL",
-                            "https://raw.githubusercontent.com/Aequalyn/market/main/db/market.json")
+                            "https://raw.githubusercontent.com/Aequalyn/aequalyn-market/main/db/market.json")
 ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,39}$")
 PALETTE = ["bgBase", "bgSurface", "bgHover", "bgSelected", "bgBorder", "textPrimary", "textSecondary",
            "textMuted", "accentPrimary", "accentCyan", "accentGreen", "accentOrange", "accentRed"]
