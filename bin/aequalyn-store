@@ -8,6 +8,9 @@
   aequalyn-store remove  <kind> <id>
   aequalyn-store list    [<kind>] [--json]
   aequalyn-store update-all
+  aequalyn-store refresh                  fetch the Market's catalog (checked against its sha256)
+  aequalyn-store market [--json]          the catalog, each item with its state here
+  aequalyn-store install-market <id>      install a catalog item at the commit it was approved at
   aequalyn-store apply-look <id> [--piece all|bar|dock|cursor|lock|sleep|sddm]
 
   kinds: plugin, theme, cursor, wallpaper, look
@@ -38,6 +41,8 @@ ROOTS = {
 KINDS = list(ROOTS)
 SHELL = CONF / "quickshell"
 SETTINGS = CONF / "aequalyn/settings.json"
+MARKET_URL = os.environ.get("AEQUALYN_MARKET_URL",
+                            "https://raw.githubusercontent.com/Aequalyn/market/main/db/market.json")
 ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,39}$")
 PALETTE = ["bgBase", "bgSurface", "bgHover", "bgSelected", "bgBorder", "textPrimary", "textSecondary",
            "textMuted", "accentPrimary", "accentCyan", "accentGreen", "accentOrange", "accentRed"]
@@ -575,6 +580,62 @@ def do_apply_look(ident, piece):
     say(f"OK  look '{ident}': " + ", ".join(wanted))
 
 
+# ---- the Market ----------------------------------------------------------------------------
+def do_refresh():
+    step(f"Fetching the catalog from {MARKET_URL}")
+    STATE.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        db, sha = Path(tmp) / "market.json", Path(tmp) / "market.json.sha256"
+        for url, out in ((MARKET_URL, db), (MARKET_URL + ".sha256", sha)):
+            r = run(["curl", "-fsSL", "--proto", "=https", "--max-filesize", str(20 << 20), "-o", str(out), url])
+            if r.returncode:
+                raise Fail(f"could not fetch {url}")
+        want = sha.read_text().split()[0] if sha.read_text().split() else ""
+        if hashlib.sha256(db.read_bytes()).hexdigest() != want:
+            raise Fail("the catalog does not match its sha256: it was not kept")
+        cat = json_file(db, "the catalog")
+        if not isinstance(cat.get("items"), list):
+            raise Fail("the catalog has no items")
+        shutil.copy2(db, STATE / "market.json")
+    say(f"OK  catalog version {cat.get('version')}: {len(cat['items'])} items")
+
+
+def market_items():
+    try:
+        cat = json.loads((STATE / "market.json").read_text())
+    except Exception:
+        raise Fail("no catalog yet: run aequalyn-store refresh")
+    d = db_load()
+    out = []
+    for it in cat.get("items", []):
+        rec = d.get(f"{it.get('kind')}:{it.get('id')}")
+        state = "not installed"
+        if rec:
+            state = "installed" if rec.get("commit") == it.get("commit") else "update available"
+        out.append(dict(it, state=state))
+    return out
+
+
+def do_market(as_json):
+    items = market_items()
+    if as_json:
+        print(json.dumps(items, indent=2))
+    else:
+        for it in items:
+            print(f"{it['kind']:<10} {it['id']:<24} {it.get('commit', '')[:12]:<13} {it['state']}")
+
+
+def do_install_market(ident):
+    it = next((i for i in market_items() if i.get("id") == ident), None)
+    if not it:
+        raise Fail(f"'{ident}' is not in the catalog")
+    if it["kind"] not in CHECKS:
+        raise Fail(f"a {it['kind']} installs from its own page (build it with makepkg in a terminal)")
+    if not re.match(r"^[0-9a-f]{40}$", str(it.get("commit", ""))):
+        raise Fail(f"the catalog has no pinned commit for '{ident}'")
+    do_install(it["kind"], it["repo"], it["commit"])
+
+
 def main(argv):
     args = list(argv)
     if not args or args[0] in ("-h", "--help", "help"):
@@ -600,6 +661,17 @@ def main(argv):
         if kind and kind not in KINDS:
             raise Fail(f"unknown kind: {kind}")
         do_list(kind, "--json" in switches)
+        return 0
+    if cmd == "refresh":
+        do_refresh()
+        return 0
+    if cmd == "market":
+        do_market("--json" in switches)
+        return 0
+    if cmd == "install-market":
+        if len(args) != 2:
+            raise Fail("usage: install-market <id>")
+        do_install_market(args[1])
         return 0
     if cmd == "update-all":
         failed = []
