@@ -1,0 +1,632 @@
+#!/usr/bin/env python3
+# aequalyn:summary=The Store's engine: check, install, update and remove plugins, themes, cursors, wallpaper packs and looks
+"""aequalyn-store -- what the Store runs. Every install goes through the same checks first.
+
+  aequalyn-store check   <kind> <git-url|dir> [--at <commit>] [--market]
+  aequalyn-store install <kind> <git-url|dir> [--at <commit>] [--enable]
+  aequalyn-store update  <kind> <id>
+  aequalyn-store remove  <kind> <id>
+  aequalyn-store list    [<kind>] [--json]
+  aequalyn-store apply-look <id> [--piece all|bar|dock|cursor|lock|sleep|sddm]
+
+  kinds: plugin, theme, cursor, wallpaper, look
+  (the plan's spellings work too: install-plugin <src>, list-themes --json, ...)
+
+A source is a git URL (cloned with --depth 1, or at --at <commit>) or a local folder.
+Nothing is installed unless every check passes; the report says what failed and why.
+--market also asks for what a Market submission must carry (README.md, Preview.qml...).
+
+A look is a set of visual settings, one piece or several: the bar's look, the docks'
+look, a cursor look (Plume), a lock screen design, the lock and sleep timings, and an
+SDDM login theme. Install keeps it; apply-look wears it, all of it or one piece.
+"""
+import hashlib, json, os, re, shutil, subprocess, sys, tempfile
+from pathlib import Path
+
+HOME = Path.home()
+CONF = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config"))
+DATA = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share"))
+STATE = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "aequalyn-store"
+ROOTS = {
+    "plugin": DATA / "aequalyn/plugins",
+    "theme": CONF / "aequalyn/themes",
+    "cursor": DATA / "icons",
+    "wallpaper": DATA / "aequalyn/wallpapers",
+    "look": DATA / "aequalyn/looks",
+}
+KINDS = list(ROOTS)
+SHELL = CONF / "quickshell"
+SETTINGS = CONF / "aequalyn/settings.json"
+ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,39}$")
+PALETTE = ["bgBase", "bgSurface", "bgHover", "bgSelected", "bgBorder", "textPrimary", "textSecondary",
+           "textMuted", "accentPrimary", "accentCyan", "accentGreen", "accentOrange", "accentRed"]
+HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
+# the programs a plugin may start
+ALLOWED_PROGRAMS = {"qs", "hyprctl", "gsettings", "notify-send", "wl-copy", "wl-paste", "xdg-open",
+                    "brightnessctl", "wpctl", "pactl", "playerctl", "nmcli", "bluetoothctl"}
+BANNED = [
+    (r"\bXMLHttpRequest\b", "requests to the network"),
+    (r"\b(eval|Function)\s*\(", "code built from strings (eval)"),
+    (r"(source|url|import)\s*[:=]?\s*\"https?://", "code or files loaded from a remote URL"),
+    (r"\bsudo\b|\bpkexec\b|\bdoas\b", "asking for root"),
+    (r"\|\s*(ba|z|da)?sh\b", "a pipe into a shell"),
+    (r"\b(curl|wget)\b", "downloads"),
+    (r"\.bashrc|\.zshrc|\.profile|autostart", "edits to shell start-up files or autostart"),
+    (r"[A-Za-z0-9+/=]{200,}", "a long base64 blob"),
+    (r"(\\x[0-9a-fA-F]{2}){20,}", "a long hex blob"),
+]
+IMAGE_MAGIC = [b"\x89PNG", b"\xff\xd8\xff", b"RIFF", b"GIF8"]
+VIDEO_EXT = {".mp4", ".webm", ".mkv", ".mov"}
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+MAX_ICON = 1 << 20          # 1 MiB
+MAX_MEDIA = 200 << 20       # 200 MiB a file
+
+
+class Fail(Exception):
+    pass
+
+
+def say(msg):
+    print(msg, flush=True)
+
+
+def step(msg):
+    say(f"==> {msg}")
+
+
+def run(cmd, **kw):
+    return subprocess.run(cmd, capture_output=True, text=True, **kw)
+
+
+def qs_ipc(*args):
+    if shutil.which("qs"):
+        r = run(["qs", "ipc", "call", *args])
+        return r.stdout.strip() if r.returncode == 0 else None
+    return None
+
+
+# ---- sources ---------------------------------------------------------------------------
+def fetch(src, at, tmp):
+    """the source in a temp folder: (path, commit or "")"""
+    if os.path.isdir(src):
+        dst = Path(tmp) / "src"
+        shutil.copytree(src, dst, symlinks=True, ignore=shutil.ignore_patterns(".git"))
+        commit = ""
+        if (Path(src) / ".git").exists():
+            commit = run(["git", "-C", src, "rev-parse", "HEAD"]).stdout.strip()
+        return dst, commit
+    if not re.match(r"^https://[\w.-]+/[\w./-]+$", src):
+        raise Fail(f"not a folder, nor an https git URL: {src}")
+    dst = Path(tmp) / "src"
+    step(f"Cloning {src}" + (f" at {at}" if at else ""))
+    if at:
+        if not re.match(r"^[0-9a-f]{7,40}$", at):
+            raise Fail(f"not a commit id: {at}")
+        os.makedirs(dst)
+        for c in (["git", "init", "-q"], ["git", "remote", "add", "origin", src],
+                  ["git", "fetch", "-q", "--depth", "1", "origin", at], ["git", "checkout", "-q", "FETCH_HEAD"]):
+            r = run(c, cwd=dst)
+            if r.returncode:
+                raise Fail(f"git: {r.stderr.strip() or ' '.join(c)}")
+    else:
+        r = run(["git", "clone", "-q", "--depth", "1", src, str(dst)])
+        if r.returncode:
+            raise Fail(f"git clone failed: {r.stderr.strip()}")
+    commit = run(["git", "-C", str(dst), "rev-parse", "HEAD"]).stdout.strip()
+    shutil.rmtree(dst / ".git", ignore_errors=True)
+    return dst, commit
+
+
+def default_id(src, prefix):
+    name = Path(src.rstrip("/")).name
+    name = re.sub(r"\.git$", "", name).lower()
+    for p in (f"aequalyn-{prefix}-", "aequalyn-"):
+        if name.startswith(p):
+            name = name[len(p):]
+    return re.sub(r"[^a-z0-9-]", "-", name).strip("-")
+
+
+# ---- shared checks ---------------------------------------------------------------------
+def no_escapes(root):
+    """no symlinks leaving the folder, no executables outside allowed places"""
+    for p in root.rglob("*"):
+        if p.is_symlink():
+            t = (p.parent / os.readlink(p)).resolve()
+            if not str(t).startswith(str(root.resolve())):
+                raise Fail(f"{p.relative_to(root)} links outside the folder")
+
+
+def json_file(path, what):
+    try:
+        return json.loads(path.read_text())
+    except FileNotFoundError:
+        raise Fail(f"{what} is missing")
+    except Exception as e:
+        raise Fail(f"{what} does not parse: {e}")
+
+
+def real_image(path, cap):
+    if not path.is_file():
+        raise Fail(f"{path.name} is missing")
+    if path.stat().st_size > cap:
+        raise Fail(f"{path.name} is larger than {cap >> 20} MiB")
+    head = path.read_bytes()[:12]
+    if path.suffix.lower() in VIDEO_EXT:
+        if b"ftyp" not in head and not head.startswith(b"\x1a\x45\xdf\xa3"):
+            raise Fail(f"{path.name} is not a real video")
+        return
+    if not any(head.startswith(m) for m in IMAGE_MAGIC):
+        raise Fail(f"{path.name} is not a real image")
+
+
+def qmllint(files, root):
+    tool = shutil.which("qmllint") or "/usr/lib/qt6/bin/qmllint"
+    if not os.path.exists(tool):
+        say("   (qmllint not found: install qt6-declarative to lint)")
+        return
+    step(f"qmllint over {len(files)} QML files")
+    errors = []
+    for f in files:
+        out = run([tool, "--bare", str(f)])
+        for line in (out.stdout + out.stderr).splitlines():
+            if line.startswith("Error") or "error:" in line.lower() and "import" not in line.lower():
+                errors.append(line.replace(str(root) + "/", ""))
+            elif line.startswith("Warning") and "Unknown import syntax" not in line:
+                say("   " + line.replace(str(root) + "/", ""))
+    if errors:
+        raise Fail("qmllint found errors:\n   " + "\n   ".join(errors))
+
+
+def scan_code(files, root, ident):
+    step("Looking for what a plugin must not do")
+    problems = []
+    for f in files:
+        text = f.read_text(errors="replace")
+        rel = f.relative_to(root)
+        for pat, why in BANNED:
+            if re.search(pat, text):
+                problems.append(f"{rel}: {why}")
+        for m in re.finditer(r"command\s*:\s*\[\s*\"([^\"]+)\"", text):
+            prog = os.path.basename(m.group(1))
+            if prog not in ALLOWED_PROGRAMS:
+                problems.append(f"{rel}: runs '{prog}', which is not on the allowed list")
+        for m in re.finditer(r"IpcHandler\s*\{[^}]*?target\s*:\s*\"([^\"]*)\"", text, re.S):
+            if m.group(1) != ident:
+                problems.append(f"{rel}: an IpcHandler named '{m.group(1)}' (it must be '{ident}')")
+    if problems:
+        raise Fail("not allowed:\n   " + "\n   ".join(sorted(set(problems))))
+
+
+def builtin_ids():
+    p = SHELL / "Plugins.js"
+    return set(re.findall(r"id:\s*\"([^\"]+)\"", p.read_text())) if p.exists() else set()
+
+
+# ---- per kind: check returns (id, meta) -------------------------------------------------
+def check_plugin(root, src, market):
+    step("Checking the main files")
+    man = json_file(root / "plugin.json", "plugin.json")
+    for k in ("id", "label", "entry", "icon", "group", "keys", "about", "version", "repo"):
+        if k not in man:
+            raise Fail(f"plugin.json has no '{k}'")
+    ident = man["id"]
+    if not ID_RE.match(ident):
+        raise Fail(f"plugin.json: id '{ident}' must be short, lowercase letters, digits and dashes")
+    if ident in builtin_ids():
+        raise Fail(f"'{ident}' is a built-in plugin's id")
+    if man["group"] not in ("screen", "key", "background"):
+        raise Fail("plugin.json: group must be screen, key or background")
+    entry = root / man["entry"]
+    if not entry.is_file() or entry.suffix != ".qml" or "/" in man["entry"]:
+        raise Fail(f"the entry {man['entry']} is missing (a .qml file beside plugin.json)")
+    body = re.sub(r"(?m)^\s*(import|pragma|//).*$", "", entry.read_text())
+    if re.match(r"\s*ShellRoot\b", body):
+        raise Fail("the entry is a ShellRoot: it must be an Item")
+    qml = sorted(root.rglob("*.qml"))
+    for f in qml:
+        if "pragma Singleton" in f.read_text() and not (f.parent / "qmldir").is_file():
+            raise Fail(f"{f.parent.relative_to(root) or '.'} has a singleton but no qmldir")
+    if market:
+        for need in ("Preview.qml", "README.md"):
+            if not (root / need).is_file():
+                raise Fail(f"{need} is missing (the Market shows it on your item's page)")
+    no_escapes(root)
+    scan_code(qml, root, ident)
+    qmllint(qml, root)
+    return ident, {"label": man["label"], "version": man["version"], "repo": man.get("repo", src)}
+
+
+def check_theme(root, src, market):
+    step("Checking the theme")
+    ident = default_id(src, "theme")
+    pal = None
+    if (root / "theme.json").exists():
+        t = json_file(root / "theme.json", "theme.json")
+        pal = t.get("palette")
+        if not isinstance(pal, dict):
+            raise Fail("theme.json has no palette")
+        name = t.get("name", ident)
+        bc = pal.get("borderColors")
+        if bc is not None and (not isinstance(bc, list) or not all(isinstance(c, str) and HEX.match(c) for c in bc)):
+            raise Fail("borderColors must be a list of #rrggbb colours")
+    elif (root / "colors.toml").exists():
+        pal = dict(re.findall(r'(?m)^\s*([A-Za-z]+)\s*=\s*"(#[0-9a-fA-F]{6})"', (root / "colors.toml").read_text()))
+        name = ident
+    else:
+        name = ident
+    if pal is not None:
+        missing = [k for k in PALETTE if not (isinstance(pal.get(k), str) and HEX.match(pal[k]))]
+        if missing:
+            raise Fail("the palette lacks (or mistypes) " + ", ".join(missing))
+    bgs = root / "backgrounds"
+    media = [p for p in bgs.iterdir()] if bgs.is_dir() else []
+    if pal is None and not media:
+        raise Fail("neither a palette (theme.json, colors.toml) nor a backgrounds/ folder")
+    for p in media:
+        if p.suffix.lower() not in IMAGE_EXT | VIDEO_EXT:
+            raise Fail(f"backgrounds/{p.name}: only images and videos belong here")
+        real_image(p, MAX_MEDIA)
+    if (root / "preview.png").exists():
+        real_image(root / "preview.png", 4 << 20)
+    if market and not (root / "README.md").is_file():
+        raise Fail("README.md is missing")
+    no_escapes(root)
+    if not ID_RE.match(ident):
+        raise Fail(f"the folder name gives the id '{ident}', which is not a valid id")
+    return ident, {"label": name, "version": "", "repo": src}
+
+
+def check_cursor(root, src, market):
+    step("Checking the cursor theme")
+    ident = default_id(src, "cursor")
+    xc, hc = root / "cursors", [root / "manifest.hl", root / "manifest.toml"]
+    if not xc.is_dir() and not any(p.exists() for p in hc):
+        raise Fail("neither an XCursor cursors/ folder nor a Hyprcursor manifest")
+    for m in hc:
+        if m.exists() and re.search(r"\.\./|=\s*/", m.read_text()):
+            raise Fail(f"{m.name} points outside the theme")
+    real_image(root / "icon.png", MAX_ICON) if (market or (root / "icon.png").exists()) else None
+    for p in root.rglob("*"):
+        if p.is_file() and os.access(p, os.X_OK) and xc not in p.parents:
+            raise Fail(f"{p.relative_to(root)} is executable")
+        if p.is_file() and xc in p.parents and not p.is_symlink() and not p.read_bytes()[:4] == b"Xcur":
+            raise Fail(f"{p.relative_to(root)} is not an XCursor file")
+    if market and not (root / "README.md").is_file():
+        raise Fail("README.md is missing")
+    no_escapes(root)
+    return ident, {"label": ident, "version": "", "repo": src}
+
+
+def check_wallpaper(root, src, market):
+    step("Checking the wallpaper pack")
+    ident = default_id(src, "wallpapers")
+    idx = json_file(root / "index.json", "index.json")
+    if not isinstance(idx, list) or not idx:
+        raise Fail("index.json must be a list of wallpapers")
+    for i, w in enumerate(idx):
+        if not isinstance(w, dict) or not all(k in w for k in ("file", "title", "credit", "url")):
+            raise Fail(f"index.json entry {i + 1} needs file, title, credit and url")
+        if "/" in w["file"] or w["file"].startswith(".") or Path(w["file"]).suffix.lower() not in IMAGE_EXT | VIDEO_EXT:
+            raise Fail(f"index.json entry {i + 1}: '{w['file']}' is not a plain image or video name")
+        if not str(w["url"]).startswith("https://"):
+            raise Fail(f"index.json entry {i + 1}: the url must be https")
+        if src.startswith("https://") and not w["url"].startswith(src.rstrip("/").removesuffix(".git").replace("github.com", "raw.githubusercontent.com")) \
+                and not w["url"].startswith(src.rstrip("/").removesuffix(".git")):
+            raise Fail(f"index.json entry {i + 1}: the url is not inside the pack's own repo")
+    if market and not (root / "README.md").is_file():
+        raise Fail("README.md is missing")
+    return ident, {"label": ident, "version": "", "repo": src, "index": idx}
+
+
+LOOK_PIECES = ("bar", "dock", "cursor", "lock", "sleep", "sddm")
+
+
+def check_look(root, src, market):
+    step("Checking the look")
+    look = json_file(root / "look.json", "look.json")
+    ident = look.get("id", "")
+    if not ID_RE.match(ident):
+        raise Fail("look.json: id must be short, lowercase letters, digits and dashes")
+    pieces = look.get("pieces")
+    if not isinstance(pieces, dict) or not pieces or any(k not in LOOK_PIECES for k in pieces):
+        raise Fail("look.json: pieces must hold one or more of " + ", ".join(LOOK_PIECES))
+    for k in ("bar", "dock", "cursor"):
+        v = pieces.get(k)
+        if v is not None and (not isinstance(v, dict) or not all(isinstance(x, (str, int, float, bool)) for x in v.values())):
+            raise Fail(f"the {k} piece must be a flat object of settings")
+    if "sleep" in pieces:
+        s = pieces["sleep"]
+        for key, val in s.items():
+            if key.endswith("Enabled") and isinstance(val, bool):
+                continue
+            if key.endswith("Minutes") and isinstance(val, int) and 1 <= val <= 240:
+                continue
+            raise Fail(f"the sleep piece: '{key}' is not a timing this shell knows")
+    if "lock" in pieces:
+        f = root / str(pieces["lock"])
+        if not f.is_file() or f.suffix != ".conf" or "/" in str(pieces["lock"]):
+            raise Fail("the lock piece must name a .conf file beside look.json")
+        text = f.read_text()
+        if re.search(r"\bcmd\[|\bexec\b|\$\(|`", text):
+            raise Fail(f"{f.name} runs commands (cmd[...] or exec): a lock screen only draws")
+    if "sddm" in pieces:
+        d = root / str(pieces["sddm"]).rstrip("/")
+        if not d.is_dir() or not (d / "Main.qml").is_file() or not (d / "metadata.desktop").is_file():
+            raise Fail("the sddm piece must name a folder with Main.qml and metadata.desktop")
+        qml = sorted(d.rglob("*.qml"))
+        for f in qml:
+            for pat, why in BANNED:
+                if re.search(pat, f.read_text(errors="replace")):
+                    raise Fail(f"{f.relative_to(root)}: {why}")
+        qmllint(qml, root)
+    if market and not (root / "README.md").is_file():
+        raise Fail("README.md is missing")
+    no_escapes(root)
+    return ident, {"label": look.get("name", ident), "version": str(look.get("version", "")),
+                   "repo": look.get("repo", src), "pieces": sorted(pieces)}
+
+
+CHECKS = {"plugin": check_plugin, "theme": check_theme, "cursor": check_cursor,
+          "wallpaper": check_wallpaper, "look": check_look}
+
+
+# ---- installed.json ----------------------------------------------------------------------
+def db_load():
+    try:
+        return json.loads((STATE / "installed.json").read_text())
+    except Exception:
+        return {}
+
+
+def db_save(d):
+    STATE.mkdir(parents=True, exist_ok=True)
+    tmp = STATE / "installed.json.tmp"
+    tmp.write_text(json.dumps(d, indent=2) + "\n")
+    tmp.replace(STATE / "installed.json")
+
+
+# ---- settings.json -----------------------------------------------------------------------
+def settings_update(fn):
+    d = json.loads(SETTINGS.read_text()) if SETTINGS.exists() else {}
+    fn(d)
+    tmp = SETTINGS.with_suffix(".json.store")
+    tmp.write_text(json.dumps(d, indent=2) + "\n")
+    tmp.replace(SETTINGS)
+
+
+# ---- commands ------------------------------------------------------------------------------
+def do_check(kind, src, at, market):
+    with tempfile.TemporaryDirectory(prefix="aequalyn-store-") as tmp:
+        root, commit = fetch(src, at, tmp)
+        ident, meta = CHECKS[kind](root, src, market)
+        say(f"OK  {kind} '{ident}' passes every check" + (f" at {commit[:12]}" if commit else ""))
+        return ident
+
+
+def do_install(kind, src, at, enable=True, quiet_update=False):
+    with tempfile.TemporaryDirectory(prefix="aequalyn-store-") as tmp:
+        root, commit = fetch(src, at, tmp)
+        ident, meta = CHECKS[kind](root, src, False)
+        dest = ROOTS[kind] / ident
+        step(f"Installing to {dest}")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if kind == "wallpaper":
+            fetch_pack(root, meta.pop("index"), dest, src)
+        else:
+            staged = dest.parent / f".{ident}.new"
+            shutil.rmtree(staged, ignore_errors=True)
+            shutil.copytree(root, staged, symlinks=True)
+            if dest.exists():
+                shutil.rmtree(dest)
+            staged.rename(dest)
+        d = db_load()
+        d[f"{kind}:{ident}"] = dict(meta, kind=kind, id=ident, source=src, commit=commit or at or "")
+        db_save(d)
+        activate(kind, ident, enable and not quiet_update)
+        say(f"OK  {kind} '{ident}' installed" + (f" at {commit[:12]}" if commit else ""))
+
+
+def fetch_pack(root, idx, dest, src):
+    staged = dest.parent / f".{dest.name}.new"
+    shutil.rmtree(staged, ignore_errors=True)
+    staged.mkdir(parents=True)
+    for w in idx:
+        local = root / w["file"]
+        out = staged / w["file"]
+        if local.is_file():
+            shutil.copy2(local, out)
+        else:
+            step(f"Fetching {w['file']}")
+            r = run(["curl", "-fsSL", "--proto", "=https", "--max-filesize", str(MAX_MEDIA), "-o", str(out), w["url"]])
+            if r.returncode:
+                shutil.rmtree(staged, ignore_errors=True)
+                raise Fail(f"could not fetch {w['url']}")
+        if w.get("sha256") and hashlib.sha256(out.read_bytes()).hexdigest() != w["sha256"]:
+            shutil.rmtree(staged, ignore_errors=True)
+            raise Fail(f"{w['file']} is not the file that was checked (sha256 differs)")
+        try:
+            real_image(out, MAX_MEDIA)
+        except Fail:
+            shutil.rmtree(staged, ignore_errors=True)
+            raise
+    if dest.exists():
+        shutil.rmtree(dest)
+    staged.rename(dest)
+
+
+def activate(kind, ident, enable):
+    if kind == "plugin":
+        if enable:
+            def on(d):
+                plugins = d.get("plugins")
+                if isinstance(plugins, list) and ident not in plugins:
+                    plugins.append(ident)
+            settings_update(on)
+        if qs_ipc("plugins", "rescan") is None:
+            say("   (the shell is not running: it loads the plugin when it starts)")
+    elif kind == "theme":
+        qs_ipc("theme", "reload")
+    elif kind == "cursor":
+        qs_ipc("plume", "themes")
+
+
+def do_remove(kind, ident):
+    if not ID_RE.match(ident):
+        raise Fail(f"not an id: {ident}")
+    dest = ROOTS[kind] / ident
+    d = db_load()
+    if f"{kind}:{ident}" not in d and kind != "plugin":
+        raise Fail(f"'{ident}' was not installed by the Store")
+    if kind == "plugin":
+        def off(s):
+            if isinstance(s.get("plugins"), list):
+                s["plugins"] = [p for p in s["plugins"] if p != ident]
+        settings_update(off)
+        qs_ipc("plugins", "rescan")
+    if kind == "theme":
+        cur = CONF / "aequalyn/current/theme"
+        if cur.is_symlink() and Path(os.readlink(cur)).name == ident:
+            raise Fail(f"'{ident}' is the theme you wear: pick another one first")
+    if kind == "cursor":
+        worn = run(["gsettings", "get", "org.gnome.desktop.interface", "cursor-theme"]).stdout.strip().strip("'")
+        if worn == ident:
+            raise Fail(f"'{ident}' is the cursor you wear: pick another one first")
+    if dest.exists():
+        shutil.rmtree(dest)
+    d.pop(f"{kind}:{ident}", None)
+    db_save(d)
+    if kind == "theme":
+        qs_ipc("theme", "reload")
+    say(f"OK  {kind} '{ident}' removed")
+
+
+def do_update(kind, ident):
+    rec = db_load().get(f"{kind}:{ident}")
+    if not rec:
+        raise Fail(f"'{ident}' was not installed by the Store")
+    do_install(kind, rec["source"], None, enable=False, quiet_update=True)
+
+
+def do_list(kind, as_json):
+    d = db_load()
+    items = [v for k, v in sorted(d.items()) if not kind or v.get("kind") == kind]
+    for it in items:
+        it["present"] = (ROOTS[it["kind"]] / it["id"]).exists()
+    if kind == "plugin" or not kind:
+        root = ROOTS["plugin"]
+        for p in sorted(root.glob("*/plugin.json")) if root.exists() else []:
+            if not any(i["kind"] == "plugin" and i["id"] == p.parent.name for i in items):
+                try:
+                    m = json.loads(p.read_text())
+                    items.append({"kind": "plugin", "id": p.parent.name, "label": m.get("label", ""),
+                                  "version": m.get("version", ""), "source": str(p.parent), "commit": "", "present": True})
+                except Exception:
+                    pass
+    if as_json:
+        print(json.dumps(items, indent=2))
+    else:
+        for it in items:
+            print(f"{it['kind']:<10} {it['id']:<24} {it.get('version', ''):<10} {it.get('commit', '')[:12]}")
+
+
+def do_apply_look(ident, piece):
+    root = ROOTS["look"] / ident
+    look = json_file(root / "look.json", f"the look '{ident}'")
+    pieces = look["pieces"]
+    wanted = list(pieces) if piece == "all" else [piece]
+    for p in wanted:
+        if p not in pieces:
+            raise Fail(f"the look '{ident}' has no {p} piece")
+    for p in wanted:
+        v = pieces[p]
+        step(f"Wearing its {p}")
+        if p == "bar":
+            settings_update(lambda d: d.__setitem__("barStyle", dict(d.get("barStyle") or {}, **v, enabled=True)))
+        elif p == "dock":
+            if qs_ipc("dock", "importLook", json.dumps(v)) != "ok":
+                raise Fail("the docks did not take the look (is the shell running, with docks on?)")
+        elif p == "cursor":
+            if qs_ipc("plume", "importLook", json.dumps(v)) != "ok":
+                raise Fail("Plume did not take the cursor look (is the shell running, with Plume on?)")
+        elif p == "lock":
+            lockdir = CONF / "hypr/lockscreens"
+            lockdir.mkdir(parents=True, exist_ok=True)
+            name = f"look-{ident}"
+            shutil.copy2(root / v, lockdir / f"{name}.conf")
+            settings_update(lambda d: d.setdefault("power", {}).__setitem__("lockStyle", name))
+            tool = shutil.which("aequalyn-lockscreen") or str(HOME / ".local/bin/aequalyn-lockscreen")
+            if os.path.exists(tool):
+                run([tool, "apply", name])
+        elif p == "sleep":
+            settings_update(lambda d: d.setdefault("power", {}).update(v))
+            tool = shutil.which("aequalyn-idle") or str(HOME / ".local/bin/aequalyn-idle")
+            if os.path.exists(tool):
+                run([tool])
+        elif p == "sddm":
+            src = root / str(v).rstrip("/")
+            name = f"aequalyn-look-{ident}"
+            say("   the login screen belongs to the system: sudo asks for your password")
+            script = (f'install -d /usr/share/sddm/themes/{name} && cp -r "$1/." /usr/share/sddm/themes/{name}/ '
+                      f'&& install -d /etc/sddm.conf.d && printf "[Theme]\\nCurrent={name}\\n" > /etc/sddm.conf.d/aequalyn-theme.conf')
+            r = subprocess.run(["sudo", "sh", "-c", script, "sh", str(src)])
+            if r.returncode:
+                raise Fail("the login screen theme was not installed")
+    say(f"OK  look '{ident}': " + ", ".join(wanted))
+
+
+def main(argv):
+    args = list(argv)
+    if not args or args[0] in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return 0
+    flags = {}
+    for f in ("--at", "--piece"):
+        if f in args:
+            i = args.index(f)
+            if i + 1 >= len(args):
+                raise Fail(f"{f} needs a value")
+            flags[f] = args[i + 1]
+            del args[i:i + 2]
+    switches = {s for s in ("--json", "--market", "--enable", "--no-enable") if s in args}
+    args = [a for a in args if a not in switches]
+    cmd = args[0]
+    # the plan's spellings: install-plugin, list-themes ...
+    m = re.match(r"^(check|install|update|remove|list)-(plugin|theme|cursor|wallpaper|look)s?$", cmd)
+    if m:
+        cmd, args = m.group(1), [m.group(1), m.group(2)] + args[1:]
+    if cmd == "list":
+        kind = args[1] if len(args) > 1 else ""
+        if kind and kind not in KINDS:
+            raise Fail(f"unknown kind: {kind}")
+        do_list(kind, "--json" in switches)
+        return 0
+    if cmd == "apply-look":
+        if len(args) != 2:
+            raise Fail("usage: apply-look <id> [--piece all|bar|dock|cursor|lock|sleep|sddm]")
+        piece = flags.get("--piece", "all")
+        if piece != "all" and piece not in LOOK_PIECES:
+            raise Fail(f"unknown piece: {piece}")
+        do_apply_look(args[1], piece)
+        return 0
+    if cmd not in ("check", "install", "update", "remove") or len(args) != 3 or args[1] not in KINDS:
+        raise Fail("usage: see aequalyn-store --help")
+    kind, target = args[1], args[2]
+    if cmd == "check":
+        do_check(kind, target, flags.get("--at"), "--market" in switches)
+    elif cmd == "install":
+        do_install(kind, target, flags.get("--at"), enable="--no-enable" not in switches)
+    elif cmd == "update":
+        do_update(kind, target)
+    else:
+        do_remove(kind, target)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except Fail as e:
+        print(f"FAIL {e}", file=sys.stderr, flush=True)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        sys.exit(130)
