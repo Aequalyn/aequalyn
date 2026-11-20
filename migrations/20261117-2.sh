@@ -42,6 +42,18 @@ info() { printf '\033[0;34m[20261117-2]\033[0m %s\n' "$*"; }
 ok()   { printf '\033[0;32m[20261117-2]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[20261117-2]\033[0m %s\n' "$*"; }
 
+# This migration's files are pinned to the revision that introduced Clipscape
+# and the new Settings app. A tree that already has them -- a fresh install,
+# or any machine aequalyn-update has synced since (the sync runs before the
+# migrations) -- is at or past that revision, and copying the pinned files
+# over it would roll it BACK: old Settings pages over new ones, an old
+# Plugins.js over a new BarSlot.qml, the lot. Only a tree still missing them
+# (this run by hand on a machine that could not pull) needs the download.
+if [[ -f "$AQ_ROOT/shell/plugins/clipscape/qmldir" && -f "$AQ_ROOT/shell/settings/center/Cc.qml" ]]; then
+    ok "the shell already has Clipscape and the new Settings app; nothing to do"
+    exit 0
+fi
+
 # The complete set of shell files that make up the new clipboard app and the
 # Settings app: plugin registry + Clipscape widget/entry, the whole Clipscape
 # plugin, and the whole settings/ tree.
