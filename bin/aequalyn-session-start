@@ -65,6 +65,20 @@ elif command -v aequalyn-theme >/dev/null 2>&1; then
     aequalyn-theme >/dev/null 2>&1 || log "aequalyn-theme failed"
 fi
 
+# 3b. Aequalyn FM: a fresh home -- an install's, or the live ISO's -- carries
+#     the plugin but no desktop entry for it until something registers it,
+#     and until then the app menu cannot list it and the dock cannot pin it.
+#     Register it the moment its entry is missing; the choices the installer
+#     makes on top of it (folders open with it, it answers every app's
+#     open/save dialog) are never made here. Cheap, and never again once the
+#     entry exists.
+FM_BIN="$XDG_CONFIG_HOME/quickshell/plugins/aequalynfm/bin/aequalyn-fm"
+FM_ENTRY="$HOME/.local/share/applications/aequalyn.fm.desktop"
+if [[ -x "$FM_BIN" && ! -f "$FM_ENTRY" ]]; then
+    "$FM_BIN" --install >/dev/null 2>&1 && log "registered Aequalyn FM (its menu entry)" \
+                                         || log "could not register Aequalyn FM"
+fi
+
 # 4. The shell itself (QuickShell auto-reloads on config changes).
 #    Point qs at the config directory explicitly: on the live ISO the launcher
 #    and Hyprland's executor can disagree about XDG_CONFIG_HOME, in which case
