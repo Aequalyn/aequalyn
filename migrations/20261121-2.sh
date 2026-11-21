@@ -42,7 +42,7 @@ SESSION_BLOCK='
 # Load the optional floating titlebar plugin only after Hyprland and the shell
 # are fully up. Loading it earlier (config parse / startup) crashes Hyprland.
 if [ -f "$HOME/.local/lib/aequalyn/hyprbars.so" ]; then
-    ( sleep 10; hyprctl plugin load "$HOME/.local/lib/aequalyn/hyprbars.so" >/dev/null 2>&1; sleep 1; hyprctl eval "_G.aequalyn_floating.load_decorations()" >/dev/null 2>&1 ) &
+    ( sleep 10; hyprctl plugin load "$HOME/.local/lib/aequalyn/hyprbars.so" >/dev/null 2>&1; sleep 1; hyprctl eval "_G.aequalyn_floating.load_decorations()" >/dev/null 2>&1; sleep 1; aequalyn-shell-restart >/dev/null 2>&1 ) &
 fi
 '
 
