@@ -411,6 +411,10 @@ function G.pinwheel(n, a, o)
   return out
 end
 
+-- Floating is applied as real floating windows, but a geometry is kept here so
+-- callers that want a picture for the catalogue have something sane to draw.
+function G.floating(n, a, o) return grid(a, n, shape(a, n, 1.6)) end
+
 ------------------------------------------------------------------- catalogue
 -- The order Super + L goes through them, grouped for the picker.
 
@@ -456,6 +460,7 @@ G.native = {
   { id = "master",    name = "Master",    group = "Hyprland", hint = "A master area and a stack" },
   { id = "scrolling", name = "Scrolling", group = "Hyprland", hint = "Columns on a strip that scrolls" },
   { id = "monocle",   name = "Monocle",   group = "Hyprland", hint = "One window at a time, full size" },
+  { id = "floating",  name = "Floating",  group = "Hyprland", hint = "Windows float freely, with titlebars and snap zones" },
 }
 
 return G

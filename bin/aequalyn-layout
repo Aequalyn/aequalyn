@@ -2,7 +2,7 @@
 # aequalyn-layout -- window layouts per workspace.
 #
 # Usage:
-#   aequalyn-layout list [--json]              every layout (37: 33 Aequalyn + 4 Hyprland)
+#   aequalyn-layout list [--json]              every layout (38: 33 Aequalyn + 5 Hyprland, including Floating)
 #   aequalyn-layout current [--workspace N]    the layout of a workspace
 #   aequalyn-layout set <layout> [--workspace N]
 #   aequalyn-layout next | prev [--workspace N]   step through the Super + L cycle
@@ -84,7 +84,11 @@ write_rules() {
         printf 'local L = _G.aequalyn_layouts\n'
         printf 'if L then L.configure({ pane = %s, middle = %s, gap = %s, step = %s, others = %s, flash = %s%s }) end\n' \
             "$pane" "$middle" "$gap" "$step" "$(lua_str "$others")" "$flash" "${outline:+, outline = $outline}"
-        if [[ -n "$def" ]]; then
+        if [[ "$def" == "floating" ]]; then
+            # "floating" is a way of arranging a workspace, not a Hyprland
+            # layout name: keep the compositor's underlying layout untouched.
+            printf 'if _G.aequalyn_floating then _G.aequalyn_floating.set_default(true) end\n'
+        elif [[ -n "$def" ]]; then
             printf 'hl.config({ general = { layout = %s } })\n' "$(lua_str "$def")"
         fi
         if [[ -f "$SETTINGS" ]]; then
@@ -92,7 +96,16 @@ write_rules() {
             | while IFS=$'\t' read -r ws layout; do
                 [[ "$ws" =~ ^[0-9A-Za-z:_-]+$ ]] || continue
                 [[ -n "$(jq -r --arg id "$layout" 'map(select(.id == $id))[0].id // empty' "$CATALOGUE")" ]] || continue
-                printf 'hl.workspace_rule({ workspace = %s, layout = %s })\n' "$(lua_str "$ws")" "$(lua_str "$layout")"
+                if [[ "$layout" == "floating" ]]; then
+                    printf 'if _G.aequalyn_floating then _G.aequalyn_floating.set_ws(%s, true) end\n' "$(lua_str "$ws")"
+                else
+                    printf 'hl.workspace_rule({ workspace = %s, layout = %s })\n' "$(lua_str "$ws")" "$(lua_str "$layout")"
+                    # With Floating as the default, an ordinary workspace must
+                    # opt out explicitly; otherwise its windows float too.
+                    if [[ "$def" == "floating" ]]; then
+                        printf 'if _G.aequalyn_floating then _G.aequalyn_floating.set_ws(%s, false) end\n' "$(lua_str "$ws")"
+                    fi
+                fi
             done
         fi
     } > "$tmp"

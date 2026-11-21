@@ -235,8 +235,9 @@ aequalyn-settings set-str .palette.scheme scheme-expressive
 ```
 
 ```sh
-aequalyn-layout list                        # all 37
+aequalyn-layout list                        # all 38, including Floating
 aequalyn-layout set portrait                # focused workspace
+aequalyn-layout set floating --workspace 2  # windows you place yourself
 aequalyn-layout set mosaic --workspace 3
 aequalyn-layout cycle portrait mosaic spiral dwindle   # what Super + L goes through
 aequalyn-layout option pane 0.66
