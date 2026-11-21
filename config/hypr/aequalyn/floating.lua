@@ -20,7 +20,7 @@ local NO_DECORATIONS = os.getenv("AEQUALYN_NO_FLOAT_DECORATIONS") == "1"
 
 F.workspaces = {}                 -- workspace id -> true
 F.default = false
-F.decorations = { loaded = false, attempted = false, retries = 0 }
+F.decorations = { loaded = false, attempted = false }
 F._pending = false
 
 local function fn(name)
@@ -130,7 +130,7 @@ local function plugin_loaded()
   if not ok or type(list) ~= "table" then return false end
   for _, p in ipairs(list) do
     local name = type(p) == "table" and (p.name or p.id) or p
-    if type(name) == "string" and name:lower():find("hyprbars", 1, true) then return true end
+    if name == "hyprbars" then return true end
   end
   return false
 end
@@ -161,7 +161,6 @@ local function configure_decorations()
   local ok, err = pcall(hl.config, {
     plugin = {
       hyprbars = {
-        enabled = true,
         bar_height = 26,
         bar_color = accent("e6"),
         col = { text = "rgba(f2f2f2ff)" },
@@ -205,14 +204,6 @@ local function configure_decorations()
   end
 end
 
-local function try_configure_decorations()
-  if F.decorations.loaded then return true end
-  if not plugin_loaded() then return false end
-  F.decorations.loaded = true
-  configure_decorations()
-  return true
-end
-
 function F.load_decorations()
   if NO_DECORATIONS then return end
   if plugin_loaded() then
@@ -222,30 +213,22 @@ function F.load_decorations()
   end
   if F.decorations.attempted then return end
 
+  local plugin = type(hl.plugin) == "table" and hl.plugin.load or nil
   local file = io.open(DECOR_PLUGIN, "r")
   if file then file:close() end
-  if not file then
+  if type(plugin) == "function" and file then
     F.decorations.attempted = true
-    return
+    local ok, err = pcall(plugin, DECOR_PLUGIN)
+    if not ok then report("hyprbars load", err) end
   end
 
-  if F.decorations.attempted then return end
-  F.decorations.attempted = true
-
-  -- Load through the compositor's IPC instead of hl.plugin.load, which
-  -- triggers a config reload mid-startup and can crash Hyprland.
-  if fn("timer") and fn("exec_cmd") then
-    pcall(hl.timer, function()
-      pcall(hl.exec_cmd, "hyprctl plugin load " .. DECOR_PLUGIN)
-      local function finish()
-        if try_configure_decorations() then return end
-        if (F.decorations.retries or 0) < 10 and not F.decorations.loaded then
-          F.decorations.retries = (F.decorations.retries or 0) + 1
-          pcall(hl.timer, finish, { timeout = 300, type = "oneshot" })
-        end
-      end
-      pcall(hl.timer, finish, { timeout = 1000, type = "oneshot" })
-    end, { timeout = 1000, type = "oneshot" })
+  -- Recheck instead of trusting the load call. If Hyprland cannot see the
+  -- plugin, stay quiet and leave decorations off.
+  if plugin_loaded() then
+    F.decorations.loaded = true
+    configure_decorations()
+  else
+    F.decorations.loaded = false
   end
 end
 
