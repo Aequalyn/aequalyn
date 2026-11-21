@@ -249,23 +249,31 @@ def change_tool(action: str, tool_id: str) -> int:
             print(f"{tool['name']} is not installed by Aequalyn.", file=sys.stderr)
             return 1
         npm = npm_command()
-        if not npm:
-            print("Node.js/npm or mise is required to remove this managed tool.", file=sys.stderr)
-            return 1
-        npm_args = [*npm, "uninstall", "--global", "--prefix", str(prefix),
-                    "--no-audit", "--no-fund", tool["package"]]
-        result = run_npm(npm_args)
-        if result == 0:
-            if managed_link(tool_id):
-                launcher.unlink()
-            if default_tool() == tool_id:
-                try:
-                    DEFAULT_FILE.unlink(missing_ok=True)
-                except OSError as exc:
-                    print(f"Removed {tool['name']}, but could not clear its default selection: {exc}", file=sys.stderr)
-                    return 1
-            print(f"Removed {tool['name']}. Its settings and sign-in data were kept.")
-        return result
+        if npm:
+            npm_args = [*npm, "uninstall", "--global", "--prefix", str(prefix),
+                        "--no-audit", "--no-fund", tool["package"]]
+            result = run_npm(npm_args)
+            if result != 0:
+                return result
+        else:
+            # npm can be removed after install; the managed tree is ours, so
+            # delete it directly instead of leaving a tool nobody can remove.
+            try:
+                shutil.rmtree(prefix)
+            except OSError as exc:
+                print(f"Could not remove {tool['name']}: {exc}", file=sys.stderr)
+                return 1
+            print("Node.js/npm was unavailable; removed the managed files directly.")
+        if managed_link(tool_id):
+            launcher.unlink()
+        if default_tool() == tool_id:
+            try:
+                DEFAULT_FILE.unlink(missing_ok=True)
+            except OSError as exc:
+                print(f"Removed {tool['name']}, but could not clear its default selection: {exc}", file=sys.stderr)
+                return 1
+        print(f"Removed {tool['name']}. Its settings and sign-in data were kept.")
+        return 0
 
     if action == "update" and not owned:
         print(f"{tool['name']} is not installed by Aequalyn; install it first.", file=sys.stderr)
