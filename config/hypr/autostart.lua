@@ -15,5 +15,8 @@ hl.on("hyprland.start", function()
     -- the user's password is provided (or the keyring password is empty).
     hl.exec_cmd("gnome-keyring-daemon --start --components=secrets,pkcs11,ssh")
     hl.exec_cmd(session_start)
+    -- Load the optional hyprbars titlebar plugin only after the session is up.
+    -- Loading it during config parsing crashes Hyprland.
+    hl.exec_cmd("sh -c 'sleep 4; hyprctl plugin load " .. HOME .. "/.local/lib/aequalyn/hyprbars.so >/dev/null 2>&1; sleep 1; hyprctl eval \"_G.aequalyn_floating.load_decorations()\" >/dev/null 2>&1'")
 end)
 
