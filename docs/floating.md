@@ -1,0 +1,58 @@
+# Floating workspaces
+
+Floating is an Aequalyn arrangement, not a Hyprland layout name. The generated
+`workspace-layouts.lua` therefore never contains `layout = "floating"`; it calls
+the guarded `_G.aequalyn_floating` shim instead. The compositor keeps its normal
+tiled layout underneath, so bad or stale rules cannot stop the session loading.
+
+Windows on a Floating workspace become ordinary Hyprland floating windows. They
+are tagged as managed by Aequalyn, so leaving the workspace restores their old
+state; windows the user floated by hand are left alone. If the compositor's
+window-tagging API is unavailable, the module does nothing.
+
+Decorations are optional. When `~/.local/lib/aequalyn/hyprbars.so` exists and
+loads, floating windows get a titlebar with minimize, maximize and close
+buttons. A missing plugin, an older Hyprland, or
+`AEQUALYN_NO_FLOAT_DECORATIONS=1` simply leaves decorations off — none of them
+prevents the shell or compositor from starting.
+
+Floating windows size themselves by their edges and corners: hovering near an
+edge shows the resize cursor and dragging resizes the window. The module enables
+Hyprland's border-resize with a widened grab area so the corners are easy to
+catch.
+
+The snap flyout is a shell plugin. Hover the maximize corner of a floating
+window, or press `Super + G`, to open it. Every layout is offered in a single
+row; clicking one switches the same popup to a larger chooser for that layout's
+areas. Click the area you want and the focused window is snapped there, with the
+other floating windows on that workspace filling the remaining areas. Clicking
+outside the flyout dismisses it without changing anything.
+
+Dragging a floating window upward to the top of the usable area opens the same
+picker. With a top bar that means just below the bar; with a bar on any other
+edge it is the monitor's top edge. The window never has to be pushed off screen.
+Hyprland's reserved edge includes every exclusive layer on that side, so a dock
+stacked with the bar also moves the trigger line down. One drag opens the
+flyout once; after you snap or cancel it stays closed through the short cooldown
+that covers the window move, then re-arms only once the window has left the
+trigger line. Clicking the flyout or the window being placed never brings the
+list straight back. Release the drag, choose a layout, then click an area. The area under the pointer when the
+flyout opened is preselected, and the final window geometry is derived from the
+monitor's current resolution, converted from physical to logical pixels with
+the live scale, so the placed window fills exactly the area shown in the
+flyout.
+
+Zones are laid out inside the monitor's usable area, using its live `reserved`
+edges, so the bar is avoided wherever it sits (top, bottom, left or right). The
+titlebar is drawn above the geometry reported for the client, so its height is
+reserved inside each zone; the whole decorated window fits the highlighted
+rectangle instead of spilling over it.
+
+The last snap is remembered. Moving the bar to a different edge changes the
+monitor's reserved sides, and the snapped windows are re-placed into the same
+arrangement and zone automatically, so they stay inside the new usable area.
+Changing bar settings never clears the per-workspace layout assignments.
+
+The migration `migrations/20261121-1.sh` repairs stale generated rules, adds
+Floating once to an explicit `Super + L` cycle, and adds the `Super + G` key to
+existing installs without overwriting a user's own binding.
