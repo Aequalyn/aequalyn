@@ -193,3 +193,13 @@ row per headset. Profiles come from `bin/aequalyn-bluetooth-audio`, which parses
   ISO; cloud proposal is optional and off by default.
 - **L2/L3** — first-boot wizard / permanent agent. Not in v1; `install.toml`
   and `settings.json` are designed to be their interfaces.
+
+## Networking and LocalSend
+
+LocalSend transfers files over **TCP/UDP port 53317**. A default-drop firewall
+(such as the shipped nftables ruleset) blocks that port, so LAN devices can
+never discover or send files to this machine. Migration
+`migrations/20261122-2.sh` makes the port explicitly allowed in nftables,
+ufw and firewalld when those backends are present/active, and persists the
+rule so it survives reboots. The port is therefore never blocked by Aequalyn's
+own firewall configuration.
