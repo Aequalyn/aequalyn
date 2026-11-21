@@ -32,6 +32,7 @@ hl.bind(M .. " + ALT + F", hl.dsp.exec_cmd("qs ipc call -- aequalyn-fm open " ..
 hl.bind(M .. " + B",       hl.dsp.exec_cmd(browser))
 hl.bind(M .. " + SPACE",   hl.dsp.exec_cmd("qs ipc call programs toggle"))  -- Programs menu
 hl.bind(M .. " + D",       hl.dsp.exec_cmd("qs ipc call launcher toggle"))
+hl.bind(M .. " + G",       hl.dsp.exec_cmd("qs ipc call snap toggle"))       -- Snap layouts on floating windows
 hl.bind(M .. " + ALT + A", hl.dsp.exec_cmd("qs ipc call defaults toggle")) -- Default apps launcher
 hl.bind(M .. " + ALT + S",       hl.dsp.exec_cmd("qs ipc call store toggle"))   -- Store: plugins, themes, cursors, looks
 hl.bind(M .. " + COMMA",   hl.dsp.exec_cmd("qs ipc call aequalyn settings"))
@@ -42,7 +43,7 @@ hl.bind(M .. " + ALT + L",   hl.dsp.exec_cmd("qs ipc call aequalyn page arrange"
 hl.bind(M .. " + CTRL + left",  hl.dsp.layout("swapprev"))
 hl.bind(M .. " + CTRL + right", hl.dsp.layout("swapnext"))
 -- Super + Ctrl + L (pick a layout), Super + Z, Super + - / =, Alt + Tab and the arrow
--- keys below are made layout-aware in aequalyn/keys.lua, as in Tableau.
+-- keys below are made layout-aware in aequalyn/keys.lua.
 
 -- The theme and wallpaper picker, over the blurred desktop
 hl.bind(M .. " + T",       hl.dsp.exec_cmd("qs ipc call atelier toggle themes"))
