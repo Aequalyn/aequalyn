@@ -16,6 +16,9 @@
                                           apps from Arch, the AUR, Flathub and Snap, as JSON
                                           (no words: Flathub's most installed, page by page,
                                           and Snap's featured)
+  aequalyn-store app-info <name> [--arch ID] [--aur ID] [--flatpak ID] [--snap ID]
+                                          one app's page: every source, version and detail,
+                                          fetched from the package managers, as JSON
   aequalyn-store apply-look <id> [--piece all|bar|dock|cursor|lock|sleep|sddm]
   aequalyn-store check-appimage <file>     a real AppImage? its name and icon, read without running it
   aequalyn-store import-appimage <file>    move it to ~/Applications, give it a menu entry
@@ -888,6 +891,192 @@ def do_search_apps(q, page):
     print(json.dumps({"query": q, "page": page, "flathubPages": pages, "errors": errors, "results": results}))
 
 
+# ---- one app, on every source that can install it ------------------------------------------
+# The Store's search gives a card per backend; the app's own page gathers all of
+# them, with the details each backend publishes (version, size, url, votes...).
+# Nothing is installed here: this only reads package metadata.
+def _pacman_info(name):
+    out = []
+    if not shutil.which("pacman"):
+        return out
+    for args in (["pacman", "-Si", "--", name], ["pacman", "-Qi", "--", name]):
+        r = run(args)
+        if r.returncode != 0:
+            continue
+        fields = {}
+        for line in r.stdout.splitlines():
+            if ":" not in line:
+                continue
+            k, _, v = line.partition(":")
+            fields[k.strip()] = v.strip()
+        if not fields:
+            continue
+        installed = args[2] == "-Qi"
+        src = {
+            "source": "Arch",
+            "id": fields.get("Name", name),
+            "version": fields.get("Version", ""),
+            "installed": installed,
+            "installedVersion": fields.get("Version", "") if installed else "",
+            "about": fields.get("Description", ""),
+            "url": fields.get("URL", ""),
+            "license": fields.get("Licenses", ""),
+            "size": fields.get("Installed Size", "") or fields.get("Download Size", ""),
+            "popularity": 0,
+            "details": [{"label": k, "value": v} for k, v in fields.items()
+                        if k in ("Repository", "Architecture", "Groups", "Provides", "Depends On",
+                                 "Optional Deps", "Download Size", "Installed Size", "Packager",
+                                 "Build Date", "Install Date", "Install Reason") and v not in ("", "None")],
+        }
+        out.append(src)
+    return out[:1] if len(out) > 1 else out
+
+
+def _aur_info(name):
+    d = http_json("https://aur.archlinux.org/rpc/v5/info", {"args": [name]})
+    hits = [r for r in d.get("results", [])
+            if str(r.get("Name", "")).lower() == name.lower() or str(r.get("PackageBase", "")).lower() == name.lower()]
+    if not hits:
+        return None
+    r = hits[0]
+    installed = ""
+    ip = run(["pacman", "-Qi", "--", r["Name"]])
+    if ip.returncode == 0:
+        for line in ip.stdout.splitlines():
+            if line.startswith("Version"):
+                installed = line.partition(":")[2].strip()
+    keys = [("Version", "Version"), ("Maintainer", "Maintainer"), ("NumVotes", "Votes"),
+            ("Popularity", "Popularity"), ("License", "License"), ("Depends", "Depends on"),
+            ("MakeDepends", "Build dependencies"), ("LastModified", "Last updated"),
+            ("OutOfDate", "Out of date")]
+    return {
+        "source": "AUR", "id": r["Name"], "version": r.get("Version", ""),
+        "installed": bool(installed), "installedVersion": installed,
+        "about": r.get("Description", ""), "url": r.get("URL", ""),
+        "license": r.get("License", ""), "size": "",
+        "popularity": r.get("NumVotes", 0) or 0,
+        "details": [{"label": label, "value": ", ".join(r[k]) if isinstance(r.get(k), list) else str(r.get(k, ""))}
+                    for k, label in keys if r.get(k) not in (None, "", [], 0) or k == "Version"],
+    }
+
+
+def _flathub_info(name):
+    d = http_json("https://flathub.org/api/v2/appstream/" + name)
+    if not d:
+        return None
+    releases = d.get("releases") or []
+    version = ""
+    if releases and isinstance(releases[0], dict):
+        version = str(releases[0].get("version", ""))
+    urls = d.get("urls") or {}
+    if isinstance(urls, dict):
+        url = urls.get("homepage") or urls.get("website") or ""
+    else:
+        url = ""
+    details = []
+    for key, label in (("developer_name", "Developer"), ("license", "License"),
+                       ("categories", "Categories"), ("release_notes", "Release notes")):
+        v = d.get(key)
+        if v:
+            details.append({"label": label, "value": ", ".join(v) if isinstance(v, list) else str(v)})
+    if version:
+        details.append({"label": "Latest release", "value": version})
+    installed = False
+    if shutil.which("flatpak"):
+        installed = run(["flatpak", "info", "--", name]).returncode == 0
+    about = d.get("summary") or ""
+    desc = d.get("description") or ""
+    if isinstance(desc, str):
+        import re as _re
+        desc = _re.sub(r"<[^>]+>", " ", desc)
+        desc = " ".join(desc.split())
+    return {
+        "source": "Flatpak", "id": name, "version": version,
+        "installed": installed, "installedVersion": "",
+        "about": about, "url": url, "license": str(d.get("license") or ""), "size": "",
+        "popularity": 0, "details": details, "description": desc[:2000],
+        "screenshots": [s.get("url") for s in (d.get("screenshots") or []) if isinstance(s, dict) and s.get("url")][:6],
+    }
+
+
+def _snap_info(name):
+    fields = "title,summary,description,version,license,publisher,website,media,channel-map"
+    url = "https://api.snapcraft.io/v2/snaps/info/" + name + "?fields=" + fields
+    d = http_json(url, headers={"Snap-Device-Series": "16"})
+    if not d or str(d.get("name", "")).lower() != name.lower():
+        return None
+    version = ""
+    for ch in d.get("channel-map") or []:
+        if ch.get("channel", {}).get("name", "").endswith("/stable"):
+            version = str(ch.get("version", ""))
+            break
+    if not version and d.get("channel-map"):
+        version = str(d["channel-map"][0].get("version", ""))
+    pub = d.get("publisher") or {}
+    details = []
+    for value, label in ((pub.get("display-name"), "Publisher"), (d.get("license"), "License"),
+                         (d.get("website"), "Website"), (d.get("contact"), "Contact")):
+        if value:
+            details.append({"label": label, "value": str(value)})
+    if version:
+        details.append({"label": "Latest version", "value": version})
+    icon = next((m["url"] for m in d.get("media", []) if m.get("type") == "icon" and m.get("url")), "")
+    installed = False
+    if shutil.which("snap"):
+        installed = run(["snap", "list", name]).returncode == 0
+    return {
+        "source": "Snap", "id": name, "version": version,
+        "installed": installed, "installedVersion": "",
+        "about": d.get("summary") or "", "url": d.get("website") or "",
+        "license": d.get("license") or "", "size": "", "popularity": 0,
+        "details": details, "description": str(d.get("description") or "")[:2000],
+        "icon": icon,
+    }
+
+
+def do_app_info(q, ids=None):
+    from concurrent.futures import ThreadPoolExecutor
+    name = q.strip()[:80]
+    if not name or not PKG_RE.match(name):
+        raise Fail("not an app name")
+    # the app's page knows the id each backend uses (Flatpak's org.mozilla.firefox
+    # is not "firefox"), so ask each one for that exact id when it is given
+    ids = {k: str((ids or {}).get(k, "")).strip() for k in ("Arch", "AUR", "Flatpak", "Snap")}
+    for source, ident in ids.items():
+        if ident and not PKG_RE.match(ident):
+            raise Fail("not a package id: " + source)
+    explicit = any(ids.values())
+    fetchers = {"Arch": _pacman_info, "AUR": _aur_info,
+                "Flatpak": _flathub_info, "Snap": _snap_info}
+    if explicit:
+        jobs = {k: (lambda k=k: fetchers[k](ids[k])) for k in ids if ids[k]}
+    else:
+        jobs = {k: (lambda k=k: fetchers[k](name)) for k in fetchers}
+    sources, errors = [], {}
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        futs = {k: ex.submit(f) for k, f in jobs.items()}
+        for k, f in futs.items():
+            try:
+                got = f.result()
+                if got:
+                    sources += got if isinstance(got, list) else [got]
+            except Exception as e:
+                errors[k] = str(e)[:120]
+    sources.sort(key=lambda s: ["Arch", "AUR", "Flatpak", "Snap"].index(s["source"]))
+    app = {"key": name.lower(), "name": name, "icon": "", "about": "", "description": "",
+           "screenshots": [], "sources": sources}
+    for s in sources:
+        if not app["about"] and s.get("about"):
+            app["about"] = s["about"]
+        if not app["description"] and s.get("description"):
+            app["description"] = s["description"]
+        if not app["icon"] and s.get("icon"):
+            app["icon"] = s["icon"]
+        if not app["screenshots"] and s.get("screenshots"):
+            app["screenshots"] = s["screenshots"]
+    print(json.dumps({"query": name, "apps": [app], "errors": errors}))
+
+
 # ---- AppImages: one file is the whole app -------------------------------------------------
 # The AppImageLauncher way, no root: the file's magic is checked, its name and icon
 # read out of the embedded filesystem (never run), then it moves to ~/Applications and
@@ -1505,7 +1694,7 @@ def main(argv):
         print(__doc__.strip())
         return 0
     flags = {}
-    for f in ("--at", "--piece", "--page"):
+    for f in ("--at", "--piece", "--page", "--arch", "--aur", "--flatpak", "--snap"):
         if f in args:
             i = args.index(f)
             if i + 1 >= len(args):
@@ -1528,6 +1717,12 @@ def main(argv):
     if cmd == "search-apps":
         page = int(flags.get("--page", "1")) if flags.get("--page", "1").isdigit() else 1
         do_search_apps(" ".join(args[1:]), max(1, min(page, 500)))
+        return 0
+    if cmd == "app-info":
+        if len(args) != 2:
+            raise Fail("usage: app-info <name>")
+        do_app_info(args[1], {"Arch": flags.get("--arch", ""), "AUR": flags.get("--aur", ""),
+                              "Flatpak": flags.get("--flatpak", ""), "Snap": flags.get("--snap", "")})
         return 0
     if cmd == "refresh":
         do_refresh()
