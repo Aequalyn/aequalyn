@@ -2,7 +2,8 @@
 # aequalyn-session-start -- Hyprland autostart glue for the Aequalyn desktop.
 # Called from hyprland.lua via hl.on("hyprland.start") and, on the live ISO,
 # from aequalyn-live-login once the Hyprland/Wayland sockets exist. Safe to
-# call twice: qs -n refuses a second instance and every other step is idempotent.
+# call twice: the watchdog's start is idempotent and every other step is safe to
+# repeat.
 set -u
 # ~/.local/bin first, once: this runs again on every shell restart, with the PATH it
 # left behind
@@ -79,49 +80,46 @@ if [[ -x "$FM_BIN" && ! -f "$FM_ENTRY" ]]; then
                                          || log "could not register Aequalyn FM"
 fi
 
-# 4. The shell itself (QuickShell auto-reloads on config changes).
-#    Point qs at the config directory explicitly: on the live ISO the launcher
-#    and Hyprland's executor can disagree about XDG_CONFIG_HOME, in which case
-#    qs silently finds no configuration at all. Keep its output in the log so a
-#    QML/load failure is diagnosable instead of disappearing into /dev/null.
+# 4. The shell itself (QuickShell auto-reloads on config changes), under the
+#    watchdog: aequalyn-watchdog runs qs, restarts it if it crashes, hangs
+#    (an unanswered heartbeat) or outgrows its memory budget, and runs the
+#    plugins marked `sandbox: true` out of process, so a failing plugin can
+#    only take itself down. `start` is idempotent -- a second call finds the
+#    control socket and exits -- and it adopts an already-running shell
+#    rather than replacing it.
+#    Point the watchdog at the config dir explicitly: on the live ISO the
+#    launcher and Hyprland's executor can disagree about XDG_CONFIG_HOME, in
+#    which case qs silently finds no configuration at all. Its output is
+#    kept in the log so a QML/load failure is diagnosable.
 QS_CONFIG="$XDG_CONFIG_HOME/quickshell"
-if command -v qs >/dev/null 2>&1; then
+if command -v aequalyn-watchdog >/dev/null 2>&1; then
     # On the live ISO two callers reach this at once: hyprland.lua's
-    # hyprland.start hook and aequalyn-live-session's start_shell. A bare
-    # `pgrep -x qs` is racy -- both can check before either has launched qs,
-    # and `qs -n` cannot help when the two start together. Serialise the
-    # check-and-launch with flock so exactly one shell is ever started.
+    # hyprland.start hook and aequalyn-live-session's start_shell. Serialise
+    # them with flock so exactly one supervisor is ever started.
     QS_LOCK="$XDG_RUNTIME_DIR/aequalyn-quickshell-start.lock"
     if exec 8>"$QS_LOCK" 2>/dev/null; then
         if flock -n 8; then
-            if pgrep -x qs >/dev/null 2>&1; then
-                log "quickshell already running"
+            # 8>&- : the daemon must not inherit the lock fd, or the
+            # flock would stay held after this script exits.
+            if aequalyn-watchdog start >>"$SESSION_LOG" 2>&1 8>&-; then
+                log "watchdog started (shell config $QS_CONFIG)"
             else
-                for attempt in 1 2 3; do
-                    # 8>&- : the daemon must not inherit the lock fd, or the
-                    # flock would stay held after this script exits.
-                    if qs -n -d -p "$QS_CONFIG" 8>&- >>"$SESSION_LOG" 2>&1; then
-                        log "quickshell started (config $QS_CONFIG)"
-                        break
-                    fi
-                    log "quickshell failed to start (attempt $attempt)"
-                    sleep 1
-                done
+                log "watchdog failed to start; launching the shell unsupervised"
+                qs -n -d -p "$QS_CONFIG" 8>&- >>"$SESSION_LOG" 2>&1 || log "quickshell failed to start"
             fi
         else
-            log "another session-start is launching QuickShell; skipping"
+            log "another session-start is launching the shell; skipping"
         fi
         exec 8>&-
     else
-        log "cannot open $QS_LOCK; falling back to pgrep guard"
-        if pgrep -x qs >/dev/null 2>&1; then
-            log "quickshell already running"
-        else
-            qs -n -d -p "$QS_CONFIG" 8>&- >>"$SESSION_LOG" 2>&1 || log "quickshell failed to start"
-        fi
+        log "cannot open $QS_LOCK; starting the watchdog without the guard"
+        aequalyn-watchdog start >>"$SESSION_LOG" 2>&1 || log "watchdog failed to start"
     fi
+elif command -v qs >/dev/null 2>&1; then
+    log "aequalyn-watchdog not found; launching the shell unsupervised"
+    qs -n -d -p "$QS_CONFIG" >>"$SESSION_LOG" 2>&1 || log "quickshell failed to start"
 else
-    log "qs not found in PATH"
+    log "neither aequalyn-watchdog nor qs found in PATH"
 fi
 
 # 5. Idle / lock -- aequalyn-idle generates the hypridle config from the user's

@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 # aequalyn-shell-restart -- Restart the Aequalyn QuickShell desktop.
+#
+# Through the watchdog when it is running (it owns the shell process and
+# restarts it in place, keeping its own supervision and the sandboxed
+# plugins), the old way -- pkill and a fresh qs -- only when it is not.
 set -Eeuo pipefail
 
 QS_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/quickshell"
+
+if command -v aequalyn-watchdog >/dev/null 2>&1 && aequalyn-watchdog status >/dev/null 2>&1; then
+    exec aequalyn-watchdog restart shell
+fi
 
 if ! command -v qs >/dev/null 2>&1; then
     echo "aequalyn-shell-restart: qs was not found in PATH" >&2

@@ -264,6 +264,15 @@ done
 chmod 755 "$TARGET/.local/bin/"* 2>/dev/null || true
 info "bin -> $TARGET/.local/bin"
 
+# The watchdog command lives in the shell tree, not in bin/: link it from the
+# installed shell, so every shell update brings the command with it. Skel is
+# skipped (an absolute symlink would still point into /etc/skel once a new
+# user's home is copied from it), and so are shells too old to have it.
+if [[ $SKEL -eq 0 && -x "$TARGET/.config/quickshell/tools/watchdog/aequalyn-watchdog" ]]; then
+    ln -sfn "$TARGET/.config/quickshell/tools/watchdog/aequalyn-watchdog" "$TARGET/.local/bin/aequalyn-watchdog"
+    info "watchdog -> $TARGET/.local/bin/aequalyn-watchdog"
+fi
+
 # 4. Wallpaper + first-run state
 # the sample wallpaper only on a first install: one you deleted stays deleted
 mkdir -p "$TARGET/Pictures/Wallpapers"
