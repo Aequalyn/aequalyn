@@ -21,6 +21,12 @@ edge shows the resize cursor and dragging resizes the window. The module enables
 Hyprland's border-resize with a widened grab area so the corners are easy to
 catch.
 
+A newly opened window on a Floating workspace is sized to half of the monitor's
+logical resolution. The monitor's live scale and reserved edges are used, and
+the decorated titlebar is counted inside that half, so the whole window starts
+at half the screen instead of only its client area. The window is sized once on
+open; later manual resizes are left alone.
+
 The snap flyout is a shell plugin. Leave the pointer in the top edge strip for a
 moment and it opens; dragging a floating window up to the same strip also opens
 it, and `Super + G` remains a manual alternative. Every layout is offered in a

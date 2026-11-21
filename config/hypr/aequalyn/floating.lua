@@ -282,7 +282,8 @@ end
 
 -- Hyprland exposes monitor fields under a few names depending on the version.
 local function num_field(t, names)
-  if type(t) ~= "table" then return nil end
+  local kind = type(t)
+  if kind ~= "table" and kind ~= "userdata" then return nil end
   for _, n in ipairs(names) do
     if type(t[n]) == "number" then return t[n] end
   end
@@ -560,6 +561,87 @@ local function on_window_active(w)
   finish()
 end
 
+-- ------------------------------------------------------------- new windows
+-- A window opened on a Floating workspace starts at half the monitor's logical
+-- resolution. Reserved edges and the decorated titlebar are removed from that
+-- rectangle so the visible window, not just its client area, is half the screen.
+local sized_on_open = {}
+
+local function titlebar_height()
+  if not F.decorations.loaded then return 0 end
+  local h = 26
+  if fn("get_config") then
+    local ok, opt = pcall(hl.get_config, "plugin:hyprbars:bar_height")
+    if ok then
+      local value = type(opt) == "table" and (opt.int or opt.value or opt.num) or opt
+      value = tonumber(value)
+      if value and value >= 0 then h = value end
+    end
+  end
+  return h + 2
+end
+
+local function usable_half_size(mon)
+  local w = num_field(mon, { "width", "w" })
+  local h = num_field(mon, { "height", "h" })
+  if not w or not h or w <= 0 or h <= 0 then return nil end
+  local scale = num_field(mon, { "scale" }) or 1
+  if scale <= 0 then scale = 1 end
+
+  local okr, r = pcall(function() return mon.reserved end)
+  if not okr then r = nil end
+  local left = num_field(r, { "left", 1 }) or 0
+  local top = num_field(r, { "top", 2 }) or 0
+  local right = num_field(r, { "right", 3 }) or 0
+  local bottom = num_field(r, { "bottom", 4 }) or 0
+
+  local usable_w = w / scale - left - right
+  local usable_h = h / scale - top - bottom
+  if usable_w < 320 or usable_h < 240 then return nil end
+
+  local client_h = math.floor(usable_h / 2) - titlebar_height()
+  if client_h < 120 then return nil end
+  return math.floor(usable_w / 2), client_h
+end
+
+local function on_window_open(event)
+  local addr = event and event.address or nil
+  local function size()
+    if not addr or sized_on_open[addr] then return end
+    local w = window_by_address(addr)
+    if not w or w.mapped == false or not F.is_ws(w.workspace) then return end
+
+    local mon = w.monitor
+    if not mon and fn("get_monitor_at_cursor") then
+      local okm, m = pcall(hl.get_monitor_at_cursor)
+      if okm then mon = m end
+    end
+    local width, height = usable_half_size(mon)
+    local resize = dsp("window", "resize")
+    if not width or not resize then return end
+
+    dispatch(resize({
+      window = "address:" .. addr,
+      x = width,
+      y = height,
+    }))
+    sized_on_open[addr] = true
+  end
+
+  -- Let the normal Floating sweep float the window first, then size the
+  -- decorated result once.
+  if fn("timer") then
+    local ok, t = pcall(hl.timer, size, { timeout = 120, type = "oneshot" })
+    if ok then return end
+  end
+  size()
+end
+
+local function on_window_close(event)
+  if event and event.address then sized_on_open[event.address] = nil end
+  pcall(F.apply)
+end
+
 function _G.aequalyn_maximize_active()
   local w = fn("get_active_window") and hl.get_active_window() or nil
   local fullscreen = dsp("window", "fullscreen")
@@ -600,10 +682,15 @@ end
 if fn("on") then
   pcall(hl.on, "config.reloaded", loaded)
   pcall(hl.on, "hyprland.start", loaded)
-  for _, ev in ipairs({ "window.open", "window.close", "window.move_to_workspace",
-                        "window.update_state", "workspace.active" }) do
+  for _, ev in ipairs({ "window.move_to_workspace", "window.update_state",
+                        "workspace.active" }) do
     pcall(hl.on, ev, F.apply)
   end
+  pcall(hl.on, "window.open", function(w)
+    pcall(F.apply)
+    on_window_open(w)
+  end)
+  pcall(hl.on, "window.close", on_window_close)
   pcall(hl.on, "window.active", on_window_active)
 end
 

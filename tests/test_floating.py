@@ -35,8 +35,12 @@ end
 
 windows = {
   { address = "0x1", mapped = true, workspace = { id = 1 }, floating = false, tags = {} },
-  { address = "0x2", mapped = true, workspace = { id = 2 }, floating = false, tags = {} },
+  { address = "0x2", mapped = true, workspace = { id = 2 }, floating = false, tags = {},
+    monitor = { width = 1920, height = 1080, scale = 1, reserved = {0, 0, 0, 0} } },
+  { address = "0x3", mapped = true, workspace = { id = 1 }, floating = false, tags = {},
+    monitor = { width = 1920, height = 1080, scale = 0.75, reserved = {0, 0, 0, 42} } },
 }
+local sizes = {}
 local function apply(d)
   if not d then return end
   local addr = d.window and d.window:match("address:(.+)") or nil
@@ -64,6 +68,8 @@ local function apply(d)
         else
           w.workspace = { id = tonumber(target) or target }
         end
+      elseif d.op == "resize" then
+        sizes[d.window] = { x = d.x, y = d.y }
       end
     end
   end
@@ -81,6 +87,7 @@ hl = {
     tag = function(o) return { op = "tag", window = o.window, tag = o.tag } end,
     float = function(o) return { op = "float", window = o.window, action = o.action } end,
     move = function(o) return { op = "move", window = o.window, workspace = o.workspace } end,
+    resize = function(o) return { op = "resize", window = o.window, x = o.x, y = o.y } end,
   } },
 }
 
@@ -143,6 +150,23 @@ check(windows[1].floating == false, "explicit non-Floating workspace beats the d
 
 F.set_default(false)
 check(windows[2].floating == false, "leaving Floating default unfloats managed windows")
+
+-- A new window on Floating starts at half the live logical monitor size, with
+-- the titlebar counted inside that rectangle. Other workspaces are untouched.
+F.set_ws("1", true)
+F.decorations.loaded = true
+hooks["window.open"](windows[3])
+local half = sizes["address:0x3"]
+check(half and half.x == 1280 and half.y == 671,
+      "new Floating window is half the logical screen, titlebar included")
+hooks["window.open"](windows[3])
+check(sizes["address:0x3"] == half,
+      "a new window is resized once, not on every window event")
+hooks["window.open"](windows[2])
+check(sizes["address:0x2"] == nil,
+      "windows outside Floating keep the size their app chose")
+F.set_ws("1", false)
+F.decorations.loaded = false
 
 hl = {}
 local ok_load, bare = pcall(dofile, path)
@@ -270,6 +294,20 @@ float_lua = (ROOT / "config/hypr/aequalyn/floating.lua").read_text()
 check('resize_on_border' in float_lua and 'extend_border_grab_area' in float_lua,
       "floating windows get drag-to-resize edge hooks")
 check('F.setup_resize_hooks()' in float_lua, "resize hooks are installed at load")
+check('local sized_on_open = {}' in float_lua and
+      'function on_window_open(event)' in float_lua and
+      'pcall(hl.on, "window.open", function(w)' in float_lua,
+      "new windows are sized when they open on a Floating workspace")
+check('function usable_half_size(mon)' in float_lua and
+      'w / scale' in float_lua and 'h / scale' in float_lua and
+      'usable_w / 2' in float_lua and 'usable_h / 2' in float_lua,
+      "half size uses the live monitor resolution, scale and reserved edges")
+check('local kind = type(t)' in float_lua and
+      'kind ~= "table" and kind ~= "userdata"' in float_lua,
+      "monitor fields are read from the compositor's userdata objects")
+check('titlebar_height()' in float_lua and
+      'plugin:hyprbars:bar_height' in float_lua,
+      "the decorated titlebar is included inside the starting half-screen size")
 check('function F.setup_drag_snap()' in float_lua and 'F.setup_drag_snap()' in float_lua,
       "compositor tracks the primary button to detect drag-to-top")
 check('snap dragTop' in float_lua,
