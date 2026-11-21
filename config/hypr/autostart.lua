@@ -17,6 +17,6 @@ hl.on("hyprland.start", function()
     hl.exec_cmd(session_start)
     -- Load the optional hyprbars titlebar plugin only after the session is up.
     -- Loading it during config parsing crashes Hyprland.
-    hl.exec_cmd("sh -c 'sleep 15; hyprctl plugin load " .. HOME .. "/.local/lib/aequalyn/hyprbars.so >/dev/null 2>&1; sleep 1; hyprctl eval \"_G.aequalyn_floating.load_decorations()\" >/dev/null 2>&1'")
+    hl.exec_cmd("sh -c 'sleep 60; hyprctl plugin load " .. HOME .. "/.local/lib/aequalyn/hyprbars.so >/dev/null 2>&1; sleep 1; hyprctl eval \"_G.aequalyn_floating.load_decorations()\" >/dev/null 2>&1'")
 end)
 
