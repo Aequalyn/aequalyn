@@ -59,6 +59,10 @@ main() {
     # Puts the newest main from GitHub in place in a root-owned clone. A fetch and a hard
     # reset, not a pull: it can't stop half way on a merge, and works even if the history
     # on GitHub was rewritten. Untracked files (the system tree's shell/) are left alone.
+    # The trees under /usr/share belong to root but are read by you: install.sh copies
+    # them as your user, and a checkout under sudo's umask leaves new files unreadable
+    # (root:root 600), which broke every step that followed. Make the whole tree
+    # readable again after every sync.
     sync_clone() { # <dir> <url> <what>
         local dir=$1 url=$2 what=$3
         step="downloading the newest $what"
@@ -66,6 +70,7 @@ main() {
         step="putting the newest $what in place"
         g "$dir" checkout -q -f -B main FETCH_HEAD
         g "$dir" reset -q --hard FETCH_HEAD
+        $SUDO chmod -R a+rX "$dir"
     }
 
     # Runs the migrations/*.sh of the newest Aequalyn that are not recorded yet, in name
