@@ -103,6 +103,15 @@ if command -v aequalyn-watchdog >/dev/null 2>&1; then
             # flock would stay held after this script exits.
             if aequalyn-watchdog start >>"$SESSION_LOG" 2>&1 8>&-; then
                 log "watchdog started (shell config $QS_CONFIG)"
+            elif aequalyn-watchdog status >/dev/null 2>&1; then
+                # "start" gave up waiting, but the daemon did come up after
+                # all: it owns the shell, and a fallback spawned now would
+                # only be refused as a duplicate (or worse, win the race and
+                # leave the desktop unsupervised, with the root gate refusing
+                # everything it asks for).
+                log "the watchdog came up after all; it owns the shell"
+            elif pgrep -x qs >/dev/null 2>&1; then
+                log "a shell is already running; the watchdog will adopt it"
             else
                 log "watchdog failed to start; launching the shell unsupervised"
                 qs -n -d -p "$QS_CONFIG" 8>&- >>"$SESSION_LOG" 2>&1 || log "quickshell failed to start"
