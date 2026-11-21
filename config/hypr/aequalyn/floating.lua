@@ -254,8 +254,7 @@ end
 -- window dragged to the top of the usable area can arm the on-screen snap grid.
 -- A top bar shifts that line below itself, so the window stays on screen. Mouse
 -- binds are non-consuming, so normal dragging and in-app clicks keep working.
-local drag = { down = false, addr = nil, start_top = nil,
-               start_x = nil, start_y = nil,
+local drag = { down = false, addr = nil, start_x = nil, start_y = nil,
                armed = false, poll = nil, regtimer = nil }
 
 local function snap_ipc(cmd)
@@ -275,7 +274,6 @@ end
 local function drag_reset()
   drag.down = false
   drag.addr = nil
-  drag.start_top = nil
   drag.start_x = nil
   drag.start_y = nil
   drag.armed = false
@@ -291,13 +289,19 @@ local function num_field(t, names)
   return nil
 end
 
--- reserved is [left, top, right, bottom]; the decoration sits above the client.
+-- reserved is [left, top, right, bottom]. The first usable row is below any
+-- bar or dock that owns the top edge; the decoration sits above the client, so
+-- the pointer strip extends a little further down than that edge.
 local function snap_top_line(mon)
   local ok, r = pcall(function() return mon.reserved end)
   local reserved_top = num_field(r, { "top", 2 }) or 0
   local oky, my = pcall(function() return mon.y end)
   if not oky then return nil end
-  return tonumber(my or 0) + reserved_top + 28
+  return tonumber(my or 0) + reserved_top
+end
+
+local function snap_top_strip(line)
+  return line + 56
 end
 
 local function drag_check()
@@ -319,30 +323,40 @@ local function drag_check()
   if not mon then return end
   local top_line = snap_top_line(mon)
   if not top_line then return end
+  local strip = snap_top_strip(top_line)
+  local mon_y = tonumber(mon.y) or top_line
 
   -- A click on the picker can reposition the window while the button is still
-  -- logically down. Require real pointer travel before treating it as a drag.
+  -- logically down. Require real upward pointer travel, not just proximity.
+  local px, py = nil, nil
   if drag.start_x and drag.start_y and fn("get_cursor_pos") then
     local okp, pos = pcall(hl.get_cursor_pos)
     if okp and type(pos) == "table" then
-      local px = tonumber(pos.x) or drag.start_x
-      local py = tonumber(pos.y) or drag.start_y
+      px = tonumber(pos.x) or drag.start_x
+      py = tonumber(pos.y) or drag.start_y
       local dx, dy = px - drag.start_x, py - drag.start_y
       if dx * dx + dy * dy < 30 * 30 then return end
+      if drag.start_y - py <= 12 then return end
     end
   end
+  if not py then return end
+
+  -- The flyout appears only when the pointer itself touches the top strip.
+  -- With a bar and/or dock on top, top_line already sits below them; allowing
+  -- a small margin above it also covers a pointer resting on that panel.
+  if py < mon_y - 12 or py > strip then return end
 
   local ay = tonumber(at.y or 0)
   local top = ay - top_line
-  -- a click on a window already at the trigger line is not a drag
-  if drag.start_top and math.abs(top - drag.start_top) < 8 then return end
+  -- The dragged window must actually be at the top, not merely pointed at.
+  if top < -240 or top > 120 then return end
 
-  if top >= -8 and top <= 48 then
-    if not drag.armed then
-      drag.armed = true
-      snap_ipc("qs ipc call snap dragTop")
-    end
-  elseif top > 70 then
+  if not drag.armed then
+    drag.armed = true
+    snap_ipc("qs ipc call snap dragTop")
+  end
+  -- Re-arm only after the pointer and the window have both left the strip.
+  if py > strip + 64 or top > 160 then
     drag.armed = false
   end
 end
@@ -378,7 +392,6 @@ end
 local function drag_press()
   local w = window_at_cursor()
   drag.addr = (w and w.address) or nil
-  drag.start_top = nil
   drag.start_x = nil
   drag.start_y = nil
   drag.armed = false
@@ -388,14 +401,6 @@ local function drag_press()
     if okp and type(pos) == "table" then
       drag.start_x = tonumber(pos.x)
       drag.start_y = tonumber(pos.y)
-    end
-  end
-  if w and drag.addr then
-    local oka, at = pcall(function() return w.at end)
-    local okm, mon = pcall(function() return w.monitor end)
-    if oka and type(at) == "table" and okm and mon then
-      local line = snap_top_line(mon)
-      if line then drag.start_top = tonumber(at.y or 0) - line end
     end
   end
   if not drag.poll then
@@ -436,44 +441,123 @@ end
 F.setup_drag_snap()
 
 -- ---------------------------------------------------------------- minimize
+local function window_by_address(addr)
+  if not addr or not fn("get_windows") then return nil end
+  local ok, windows = pcall(hl.get_windows)
+  if not ok or type(windows) ~= "table" then return nil end
+  for _, w in ipairs(windows) do
+    if w and w.address == addr then return w end
+  end
+  return nil
+end
+
+-- A window move and a tag change are separate dispatches. Doing the tag in the
+-- same tick as the move can lose the tag when Hyprland has not finished moving
+-- the window yet, which leaves a restored window marked minimized forever.
+local function mark_minimized(addr, on)
+  local function apply()
+    local w = window_by_address(addr)
+    if w then tag(w, "minimized", on) end
+  end
+  if fn("timer") then
+    local ok, t = pcall(hl.timer, apply, { timeout = 80, type = "oneshot" })
+    if ok then return end
+  end
+  apply()
+end
+
+local function is_minimized_workspace(ws)
+  if not ws then return false end
+  return ws.name == "special:minimized"
+      or tostring(ws.id) == "special:minimized"
+end
+
+-- Remember which normal workspace a window left so "bring it back" can put it
+-- back there instead of only raising the special overlay.
+local minimized_origin = {}
+
 local function minimized_windows()
   local out = {}
   if not fn("get_windows") then return out end
   local ok, windows = pcall(hl.get_windows)
   if not ok or type(windows) ~= "table" then return out end
   for _, w in ipairs(windows) do
-    if w and w.address and (has_tag(w, "minimized") or
-       (w.workspace and (w.workspace.name == "special:minimized"
-                         or tostring(w.workspace.id) == "special:minimized"))) then
-      out[#out + 1] = w
+    if w and w.address then
+      if is_minimized_workspace(w.workspace) then
+        out[#out + 1] = w
+      elseif has_tag(w, "minimized") then
+        -- A window that is visible again must not keep a stale minimized tag.
+        mark_minimized(w.address, false)
+      end
     end
   end
   return out
+end
+
+local function restore_window(w, target)
+  local move = dsp("window", "move")
+  if not w or not w.address or not move or not target then return end
+  local addr = w.address
+  dispatch(move({
+    workspace = target,
+    window = "address:" .. addr,
+  }))
+  minimized_origin[addr] = nil
+  mark_minimized(addr, false)
+end
+
+local function current_workspace()
+  return fn("get_active_workspace") and hl.get_active_workspace() or nil
 end
 
 function _G.aequalyn_minimize_active()
   local w = fn("get_active_window") and hl.get_active_window() or nil
   local move = dsp("window", "move")
   if not w or not w.address or not move then return end
-  tag(w, "minimized", true)
+  local addr = w.address
+  local here = current_workspace()
+  minimized_origin[addr] = (here and not is_minimized_workspace(here)) and here or nil
   dispatch(move({
     workspace = "special:minimized",
-    window = "address:" .. w.address,
+    window = "address:" .. addr,
     follow = false,
   }))
+  mark_minimized(addr, true)
 end
 
 function _G.aequalyn_restore_minimized()
-  local ws = fn("get_active_workspace") and hl.get_active_workspace() or nil
-  local move = dsp("window", "move")
-  if not move then return end
+  local here = current_workspace()
   for _, w in ipairs(minimized_windows()) do
-    dispatch(move({
-      workspace = ws,
-      window = "address:" .. w.address,
-    }))
-    tag(w, "minimized", false)
+    restore_window(w, minimized_origin[w.address] or here)
   end
+end
+
+-- The dock, the switcher, and every other activate-by-address path only focus
+-- a hidden window. Hyprland then keeps special:minimized as an overlay, so the
+-- normal windows stay underneath and cannot be focused or moved. Turn that
+-- focus into a real restore on the focus event itself, whatever requested it.
+local pending_restore = {}
+local function on_window_active(w)
+  if not w or not w.address then return end
+  local addr = w.address
+  if pending_restore[addr] then return end
+  if not is_minimized_workspace(w.workspace) then return end
+  local home = minimized_origin[addr] or current_workspace()
+  if not home then return end
+  pending_restore[addr] = true
+  local function finish()
+    pending_restore[addr] = nil
+    local live = window_by_address(addr)
+    if live and is_minimized_workspace(live.workspace) then
+      restore_window(live, home)
+    end
+  end
+  -- Defer so the move is not issued from inside the focus event dispatch.
+  if fn("timer") then
+    local ok, t = pcall(hl.timer, finish, { timeout = 50, type = "oneshot" })
+    if ok then return end
+  end
+  finish()
 end
 
 function _G.aequalyn_maximize_active()
@@ -520,6 +604,7 @@ if fn("on") then
                         "window.update_state", "workspace.active" }) do
     pcall(hl.on, ev, F.apply)
   end
+  pcall(hl.on, "window.active", on_window_active)
 end
 
 return F

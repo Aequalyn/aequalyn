@@ -55,16 +55,27 @@ local function apply(d)
         if not found and d.tag:sub(1, 1) == "+" then w.tags[#w.tags + 1] = name end
       elseif d.op == "float" then
         w.floating = (d.action == "set")
+      elseif d.op == "move" then
+        local target = d.workspace
+        if type(target) == "table" then
+          w.workspace = { id = target.id, name = target.name }
+        elseif tostring(target) == "special:minimized" then
+          w.workspace = { id = "special:minimized", name = "special:minimized", special = true }
+        else
+          w.workspace = { id = tonumber(target) or target }
+        end
       end
     end
   end
 end
 
+hooks = {}
 hl = {
   get_windows = function() return windows end,
   get_active_window = function() return nil end,
   get_active_workspace = function() return { id = 2 } end,
   timer = function(fn) fn() end,
+  on = function(name, cb) hooks[name] = cb end,
   dispatch = function(d) apply(d) end,
   dsp = { window = {
     tag = function(o) return { op = "tag", window = o.window, tag = o.tag } end,
@@ -77,6 +88,46 @@ local F = assert(dofile(path))
 check(type(aequalyn_minimize_active) == "function", "minimize button helper exists")
 check(type(aequalyn_maximize_active) == "function", "maximize button helper exists")
 check(type(aequalyn_close_active) == "function", "close button helper exists")
+
+-- minimize/restore must leave the workspace and the minimized tag in sync,
+-- otherwise a restored window stays in the minimized set and steals the next
+-- Super+M from the other windows.
+hl.get_active_window = function() return windows[1] end
+hl.get_active_workspace = function() return { id = 1 } end
+aequalyn_minimize_active()
+check(tostring(windows[1].workspace.id) == "special:minimized",
+      "minimize moves the active window to the hidden workspace")
+check(has(windows[1].tags, "minimized"), "minimize tags the hidden window")
+aequalyn_restore_minimized()
+check(tostring(windows[1].workspace.id) == "1",
+      "restore brings the window back to the workspace it left")
+check(not has(windows[1].tags, "minimized"),
+      "restore clears the tag so other windows remain manageable")
+
+windows[1].tags[#windows[1].tags + 1] = "minimized"
+aequalyn_minimize_active()
+aequalyn_restore_minimized()
+check(not has(windows[1].tags, "minimized"),
+      "a stale tag on a visible window is cleaned up on the next restore")
+
+-- A dock or switcher click only focuses a hidden window. Without a real move
+-- back to a normal workspace the special overlay stays active and every other
+-- window becomes unreachable. The focus hook must finish the restore.
+check(type(hooks["window.active"]) == "function",
+      "focus hook is registered to catch dock/switcher restores")
+hl.get_active_workspace = function() return { id = 2 } end
+hl.get_active_window = function() return windows[1] end
+aequalyn_minimize_active()
+check(tostring(windows[1].workspace.id) == "special:minimized",
+      "window is hidden before the dock activation")
+hooks["window.active"](windows[1])
+check(tostring(windows[1].workspace.id) == "2",
+      "focusing a hidden window restores it to its original workspace")
+check(not has(windows[1].tags, "minimized"),
+      "focus-driven restore clears the minimized tag")
+hl.get_active_window = function() return nil end
+windows[1].workspace = { id = 1 }
+
 F.set_ws("1", true)
 check(windows[1].floating == true, "Floating workspace floats its windows")
 check(has(windows[1].tags, "aq-float-mode"), "floated window is tagged")
@@ -240,6 +291,11 @@ check('non_consuming = true' in float_lua and 'ignore_mods = true' in float_lua,
 registered = re.findall(r'button\("rgb\(([0-9a-f]{6})\)"', float_lua)
 check(registered[:3] == ["ff5f57", "28c840", "febc2e"],
       "titlebar buttons register reversed to display minimize, maximize, close")
+check('pcall(hl.on, "window.active", on_window_active)' in float_lua and
+      'is_minimized_workspace(w.workspace)' in float_lua,
+      "focusing a hidden window triggers a real restore, not just an overlay")
+check('minimized_origin[addr] or current_workspace()' in float_lua,
+      "focus-driven restore returns a window to its original workspace")
 
 snap_qml = text_of(SHELL / "plugins/snap/Snap.qml")
 check('function zoneAt(preset, px, py)' in snap_qml and
@@ -247,6 +303,41 @@ check('function zoneAt(preset, px, py)' in snap_qml and
       "pointer position preselects a zone in the area chooser")
 check('Row {' in snap_qml and 'columns: 4' not in snap_qml,
       "all layouts are offered in a single row")
+check('Flickable {' not in snap_qml and
+      'root.presets.length' in snap_qml and 'Math.max(16,' in snap_qml,
+      "all layouts fit in one visible row without scrolling")
+check('Math.min(1400, win.width - 32)' in snap_qml,
+      "the picker widens so the full row is visible at once")
+
+preset_block = re.search(r"readonly property var presets: \[(.*?)\n    \]", snap_qml, re.S)
+snap_zones = []
+if preset_block:
+    for raw in re.findall(r"zones: (\[\[.*?\]\])", preset_block.group(1)):
+        try:
+            snap_zones.append(json.loads(re.sub(r"(?<!\d)\.(\d+)", r"0.\1", raw)))
+        except json.JSONDecodeError:
+            pass
+check(len(snap_zones) >= 20, "snap flyout offers an expanded layout catalogue")
+canon_zone = lambda z: tuple(sorted(tuple(round(float(v), 4) for v in r) for r in z))
+check(len({canon_zone(z) for z in snap_zones}) == len(snap_zones),
+      "no snap layout repeats another partition with reordered zones")
+check(any(len(z) >= 5 for z in snap_zones),
+      "snap flyout includes layouts for sessions with many windows")
+zones_valid = bool(snap_zones)
+for zones in snap_zones:
+    for r in zones:
+        if (len(r) != 4 or not 0 <= r[0] <= 1 or not 0 <= r[1] <= 1 or
+                r[2] <= 0 or r[3] <= 0 or r[0] + r[2] > 1.0001 or
+                r[1] + r[3] > 1.0001):
+            zones_valid = False
+    for i, a in enumerate(zones):
+        for b in zones[i + 1:]:
+            ox = min(a[0] + a[2], b[0] + b[2]) - max(a[0], b[0])
+            oy = min(a[1] + a[3], b[1] + b[3]) - max(a[1], b[1])
+            if ox > 1e-6 and oy > 1e-6:
+                zones_valid = False
+check(zones_valid, "snap zones stay inside the screen and do not overlap")
+
 check('property var selectedPreset' in snap_qml and
       'root.selectedPreset = modelData' in snap_qml and
       'root.apply(root.selectedPreset, index)' in snap_qml,
@@ -254,7 +345,8 @@ check('property var selectedPreset' in snap_qml and
 check('aequalyn_snap_preview' not in snap_qml and 'previewPreset' not in snap_qml,
       "no second full-screen preview popup is shown")
 check('function pick(' not in snap_qml and 'function state(' not in snap_qml and
-      'function mark(' not in snap_qml and 'trace' not in snap_qml,
+      'function mark(' not in snap_qml and 'trace' not in snap_qml and
+      'SNAPDBG' not in snap_qml and 'SNAPCUR' not in snap_qml,
       "no temporary verification hooks are left in the flyout")
 check('function beginDragSnap()' in snap_qml and 'function endDragSnap()' in snap_qml,
       "drag-to-top can open and close the snap picker")
@@ -296,24 +388,45 @@ check('Number(mon.width) / scale' in snap_qml and 'Number(mon.height) / scale' i
 check('hl.dsp.window.resize' in snap_qml and
       snap_qml.index('hl.dsp.window.resize') < snap_qml.index('hl.dsp.window.move'),
       "windows are resized before being moved into the zone")
-check('hyprctl -j cursorpos' in snap_qml and 'cursorProc.running = true' in snap_qml,
-      "cursor position is polled with a working process")
+check('hyprctl -j cursorpos' in snap_qml and
+      'cursorProc.exec(cursorProc.command)' in snap_qml,
+      "cursor position is polled with a process that actually restarts each tick")
+check('hyprctl activewindow -j' in snap_qml and
+      'property string focusedAddress' in snap_qml and
+      'let addr = norm(root.focusedAddress)' in snap_qml,
+      "focused window is polled directly because newer clients omit a focused flag")
 check('triggeredOnStart: true' in snap_qml,
       "poll timer starts immediately")
 check('on_double_click = "hyprctl eval' in float_lua,
       "titlebar double-click uses the working Lua dispatcher path")
-check('function snapTopLine(mon)' in snap_qml and 'reservedTop + root.titleHeight' in snap_qml,
-      "drag trigger follows the usable top edge, including a top bar")
-check('atEdge && onWindow && !root.wasAtEdge' in snap_qml and
-      'root.beginDragSnap()' in snap_qml,
-      "drag-to-top is detected from live window geometry")
+check('function snapTopEdge(mon)' in snap_qml and
+      'return Number((mon && mon.y) || 0) + reservedTop' in snap_qml and
+      'function inTopStrip(mon)' in snap_qml and
+      'root.cursorY >= monY - 12 && root.cursorY <= root.snapTopEdge(mon) + 56' in snap_qml,
+      "top strip follows the usable top edge, including a top bar or dock")
+check('function beginEdgeSnap(monIdx)' in snap_qml and
+      'function monitorAtCursor()' in snap_qml and
+      'readonly property int hoverDwellMs: 180' in snap_qml and
+      'Date.now() - root.hoverEnteredAt >= root.hoverDwellMs' in snap_qml,
+      "dwelling in the top strip opens the flyout without dragging anything")
+check('atEdge && onWindow && !root.wasAtEdge' not in snap_qml and
+      'const inMax =' not in snap_qml and 'y >= topLine - 8' not in snap_qml,
+      "no maximize-corner or geometry-only opener remains")
+check('function dragTop(): void' in snap_qml and 'snap dragTop' in float_lua,
+      "drag-to-top still opens the snap list")
+check('py < mon_y - 12 or py > strip' in float_lua and
+      'drag.start_y - py <= 12' in float_lua,
+      "drag-to-top requires an upward drag whose pointer reaches the top strip")
 check('Date.now() - root.blockedAt > 1200 && !atEdge' in snap_qml,
       "the post-snap latch re-arms only after a cooldown and a real move away")
 check('bottom_gap' not in snap_qml and 'pointerBottom' not in snap_qml and
       'snapEdge(' not in snap_qml,
       "off-screen bottom/pointer triggers are gone")
-check('function snap_top_line(mon)' in float_lua and 'reserved_top + 28' in float_lua,
-      "compositor drag tracking uses the same usable top edge")
+check('function snap_top_line(mon)' in float_lua and
+      'return tonumber(my or 0) + reserved_top' in float_lua and
+      'snap_top_strip(line)' in float_lua and 'line + 56' in float_lua and
+      'reserved_top' in float_lua and 'mon.y' in float_lua,
+      "compositor drag tracking uses the same usable top edge and pointer strip")
 check('bottom_gap' not in float_lua and 'dbg_edge' not in float_lua,
       "compositor no longer tracks the off-screen bottom edge")
 check('lastLayoutPoll' in snap_qml and 'root.refreshLayout()' in snap_qml,
