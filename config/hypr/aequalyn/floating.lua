@@ -77,13 +77,6 @@ end
 
 function F.set_default(on)
   F.default = on and true or false
-  if fn("window_rule") then
-    pcall(hl.window_rule, {
-      name = "aequalyn-hyprbar-default",
-      match = { class = ".*" },
-      ["hyprbars:no_bar"] = not F.default,
-    })
-  end
   F.apply()
 end
 
@@ -123,6 +116,14 @@ function F.sweep()
   for _, w in ipairs(windows) do
     if w and w.address and w.mapped ~= false and w.workspace and not w.workspace.special then
       local want = F.is_ws(w.workspace)
+      if fn("window_rule") then
+        local wsid = tostring(w.workspace.id or w.workspace)
+        pcall(hl.window_rule, {
+          name = "aequalyn-hyprbar-ws-" .. wsid,
+          match = { workspace = wsid },
+          ["hyprbars:no_bar"] = not want,
+        })
+      end
       local tagged = has_tag(w, TAG)
       if want and can_tag and set_float and not tagged and not w.floating then
         tag(w, TAG, true)
@@ -209,16 +210,10 @@ local function configure_decorations()
     button("rgb(28c840)", "_", "hyprctl eval 'aequalyn_minimize_active()'")
   end
 
-  -- The titlebar belongs to floating workspaces only. The catch-all default
-  -- follows F.default; per-workspace rules (F.set_ws) override it, so a
-  -- window's bar tracks the floating state of its workspace, not its own.
-  if fn("window_rule") then
-    pcall(hl.window_rule, {
-      name = "aequalyn-hyprbar-default",
-      match = { class = ".*" },
-      ["hyprbars:no_bar"] = not F.default,
-    })
-  end
+  -- The titlebar belongs to floating workspaces only. Per-workspace rules
+  -- (F.set_ws, and F.sweep for any workspace a window lands on) decide it;
+  -- there is no catch-all, so a floating workspace is never disabled by a
+  -- broader rule.
 end
 
 function F.load_decorations()
