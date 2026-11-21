@@ -130,3 +130,13 @@ end
 -- Altscape plugin manages them in a marked block at the end of hyprland.lua,
 -- so they always load after these and win. Change them in the control
 -- center's Window switcher page.
+
+-- Load the optional floating titlebar plugin on demand (avoids startup crashes).
+if hl.bind and hl.timer then
+  pcall(hl.bind, "SUPER + SHIFT + T", function()
+    hl.exec_cmd("hyprctl plugin load " .. HOME .. "/.local/lib/aequalyn/hyprbars.so")
+    pcall(hl.timer, function()
+      if _G.aequalyn_floating then _G.aequalyn_floating.load_decorations() end
+    end, { timeout = 1000, type = "oneshot" })
+  end, { description = "Load floating titlebar" })
+end
