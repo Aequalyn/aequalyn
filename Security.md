@@ -4,11 +4,34 @@ This document collects security concerns identified during a review of the
 Aequalyn codebase and installer. It is intended as a working checklist for
 hardening. Findings are grouped by severity.
 
-The passwordless-sudo configuration that exists on the maintainer's personal
-machine is intentionally **not** listed here, because it is a local
-environment choice rather than a property of the project.
-
 ## High
+
+### Plugin code could reach for root on its own (addressed)
+
+Any plugin -- sandboxed or not -- could spawn `sudo`/`pkexec` through
+QuickShell's `Process`, and the shared askpass (`aequalyn-askpass`) showed a
+generic "Aequalyn" password box, so a third-party plugin could ask for the
+user's password looking exactly like the system asking. On machines with
+passwordless sudo it was worse: no prompt at all.
+
+Mitigation now in the tree (see `tools/watchdog/README.md`, "Root: one
+gate, declared up front"):
+
+* root actions must be **declared** in the plugin's manifest, command
+  pinned, and the Store prints them before installing anything;
+* the only door is `aequalyn-watchdog exec-root`, pinned to the caller by
+  `SO_PEERCRED`, approved in a window that names the plugin and the exact
+  command, run as `sudo -S` with the password on stdin;
+* the supervisor watches every plugin's process tree for
+  sudo/pkexec/su/doas outside the gate, kills the attempt, and turns the
+  plugin off after three;
+* `aequalyn-askpass` names the process asking for the password;
+* the supervisor refuses to run as root.
+
+Honest limits: the tripwire samples every few seconds (a fast run can slip
+between samples), and same-user code can do anything the user can -- this
+is explicit, audited consent, not a hard sandbox. A hard wall would need
+bubblewrap/seccomp around every plugin process.
 
 ### Installed system autologins into the desktop
 

@@ -28,6 +28,36 @@ OSD, wallpaper picker, display manager and settings page at once. The Settings
 page also writes `aequalyn/colors.lua` when a *curated* theme is chosen, so the
 compositor border colours always agree with the shell.
 
+## The shell, its supervisor, and the one root gate
+
+```
+aequalyn-session-start ── aequalyn-watchdog (python, the user's session, never root)
+                              ├── qs -p ~/.config/quickshell          the shell, supervised
+                              └── qs -p …/watchdog/hosts/<id>        sandboxed plugins
+
+a plugin that wants root
+  plugin.json "needsRoot": [{id, label, command}]     declared, command pinned in the manifest
+        └─> aequalyn-watchdog exec-root <id>          the only door; SO_PEERCRED pins the caller
+              └─> qs ipc call watchdog escalationRequest
+                    └─> EscalationWindow.qml          names the plugin and the exact command
+                          └─> aequalyn-watchdog decide …  the password on a pipe, never argv
+                                └─> sudo -S -- <the declared argv>   stdin, timeout, logged
+```
+
+The supervisor (`tools/watchdog/` in aequalyn-shell) keeps the desktop alive
+(crash, hang by heartbeat, RAM budget) and runs risky plugins out of process,
+turning failures off like any other fault. Root is a gate, not an ambient
+privilege: nothing a plugin runs may call `sudo`/`pkexec`/`su`/`doas` itself —
+the supervisor walks every plugin's process tree for exactly that, kills the
+attempt, and counts it; three strikes turn the plugin off. Only declared
+actions, each approved in the window with the password that feeds `sudo -S`,
+ever run as root, and "always allow" remembers consent (settings.json
+`rootAllowed`) while still asking for the password. The supervisor refuses to
+run as root itself; `aequalyn-watchdog test <id> esc` stages a rogue attempt
+so the tripwire can be watched. The full contract, with its honest limits
+(sampling, consent-and-audit rather than a hard sandbox), is in
+aequalyn-shell's `tools/watchdog/README.md`; `PLUGINS.md` is the author's side.
+
 ## Atelier: themes, wallpapers, rotation, palette
 
 ```
