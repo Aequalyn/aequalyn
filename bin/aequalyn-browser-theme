@@ -11,23 +11,20 @@
 # BrowserColorScheme key: it is not a valid Chromium policy (browsers report it
 # as an error) and the colour works on its own.
 #
-# AUTHORISATION: this script NEVER writes a sudoers file and never grants any
-# passwordless sudo. Privileged writes go through pkexec, which uses the session's
-# GUI PolicyKit agent. If pkexec is unavailable, it falls back to sudo -A with
-# aequalyn-askpass (the Aequalyn GUI password prompt). A prompt appears only when
-# the policy actually needs to change; repeated syncs with the same colour do
-# nothing and do not ask again.
+# AUTHORISATION: one gate, the same one every plugin uses. The user half
+# stages the colour and calls aequalyn-watchdog exec-root (an approval window
+# naming the command, the password going to sudo on a pipe); the root half is
+# only ever started by the watchdog (gate-publish / gate-clear), re-finds the
+# staged colour through SUDO_USER's home, validates it, and writes the
+# policies itself. No pkexec, no sudo -A, no askpass, no sudoers rules -- and a
+# repeated sync with the same colour still asks for nothing (nothing changes).
 
 set -uo pipefail
 
 SETTINGS="${XDG_CONFIG_HOME:-$HOME/.config}/aequalyn/settings.json"
-# GUI prompt for the sudo fallback (pkexec uses the polkit agent instead).
-if command -v zenity >/dev/null 2>&1 && command -v aequalyn-askpass >/dev/null 2>&1; then
-    ASKPASS=$(command -v aequalyn-askpass)
-else
-    ASKPASS="$(command -v zenity || command -v yad || command -v ssh-askpass || true)"
-fi
 SELF="$(readlink -f "$0")"
+STAGE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/aequalyn/gate"
+STAGE_FILE="$STAGE_DIR/browser-theme.json"
 
 log() { printf '\033[0;34m[aequalyn-browser-theme]\033[0m %s\n' "$*" >&2; }
 
@@ -56,6 +53,60 @@ if [[ ${1:-} == "--root" ]]; then
             ;;
         *) exit 1 ;;
     esac
+    exit 0
+fi
+
+# ---- the gate halves, run as root by the watchdog's exec-root ---------------
+# The watchdog starts these with a fixed argv; everything they need from the
+# user's side was staged in a file they re-find through SUDO_USER (sudo resets
+# HOME, but always keeps SUDO_USER), and they trust nothing in it beyond
+# strict validation: the colour must be a hex pair, the directories are
+# recomputed here, as root, never taken from the file.
+gate_root_home() {
+    local user="${SUDO_USER:-}" home=""
+    [[ -n $user ]] || { log "no SUDO_USER: not started by the gate"; exit 1; }
+    home=$(getent passwd "$user" | cut -d: -f6)
+    [[ -n $home ]] || { log "no home for $user"; exit 1; }
+    printf '%s' "$home"
+}
+
+if [[ ${1:-} == "gate-publish" || ${1:-} == "gate-clear" ]]; then
+    [[ ${EUID} -eq 0 ]] || { log "gate halves need root"; exit 1; }
+    home=$(gate_root_home)
+    stage="$home/.local/state/aequalyn/gate/browser-theme.json"
+    color=""
+    if [[ ${1:-} == "gate-publish" ]]; then
+        color=$(jq -r '.color // empty' "$stage" 2>/dev/null || true)
+        [[ $color =~ ^#[0-9a-fA-F]{6}$ ]] || { log "staged colour is missing or invalid"; exit 1; }
+    fi
+    mapfile -t dirs < <(
+        find /etc -type d -path '*/policies/managed' -print 2>/dev/null | sort -u
+        for pair in \
+            "chromium:/etc/chromium/policies/managed" \
+            "chromium-browser:/etc/chromium/policies/managed" \
+            "google-chrome:/etc/opt/chrome/policies/managed" \
+            "google-chrome-stable:/etc/opt/chrome/policies/managed" \
+            "google-chrome-beta:/etc/opt/chrome/policies/managed" \
+            "microsoft-edge:/etc/opt/edge/policies/managed" \
+            "microsoft-edge-stable:/etc/opt/edge/policies/managed" \
+            "microsoft-edge-dev:/etc/opt/edge/policies/managed" \
+            "brave:/etc/brave/policies/managed" \
+            "brave-browser:/etc/brave/policies/managed" \
+            "vivaldi:/etc/vivaldi/policies/managed" \
+            "vivaldi-stable:/etc/vivaldi/policies/managed" \
+            "opera:/etc/opt/opera/policies/managed" \
+            "yandex-browser:/etc/yandex-browser/policies/managed"; do
+            cmd=${pair%%:*}; dir=${pair#*:}
+            command -v "$cmd" >/dev/null 2>&1 && printf '%s\n' "$dir"
+        done | sort -u
+    )
+    if [[ ${1:-} == "gate-publish" ]]; then
+        "$SELF" --root write "$color" "${dirs[@]}"
+        log "published $color to ${#dirs[@]} browser polic(ies)"
+    else
+        "$SELF" --root remove "${dirs[@]}"
+        log "removed the colour policy from ${#dirs[@]} browser polic(ies)"
+    fi
     exit 0
 fi
 
@@ -130,23 +181,29 @@ policy_dirs() {
     printf '%s\n' "${dirs[@]}"
 }
 
-# Authorise a privileged command with a GUI prompt. No sudoers rules are ever
-# created: pkexec uses the session's PolicyKit agent; sudo -A uses aequalyn-askpass.
-authorize_root() {
-    if command -v pkexec >/dev/null 2>&1; then
-        pkexec "$@"
-        return $?
-    fi
-    if [[ -n $ASKPASS ]]; then
-        SUDO_ASKPASS="$ASKPASS" sudo -A "$@"
-        return $?
-    fi
-    log "no GUI authorisation available (need pkexec or aequalyn-askpass)"
-    return 1
+# Ask through the gate: stage the colour, then aequalyn-watchdog exec-root
+# (an approval window names the command; the password goes to sudo on a
+# pipe). A denial or a timeout leaves everything as it was.
+stage_gate() {
+    mkdir -p "$STAGE_DIR"
+    printf '{"color": "%s"}\n' "$color" > "$STAGE_FILE"
 }
-
-write_policy() { authorize_root "$SELF" --root write "$color" "${dirs[@]}"; }
-remove_policy() { authorize_root "$SELF" --root remove "${dirs[@]}"; }
+gate_run() { # <action>
+    local reply rc=0
+    reply=$(aequalyn-watchdog exec-root --as settings "$1" 2>&1) || rc=$?
+    if [[ $rc -ne 0 ]]; then
+        if printf '%s' "$reply" | grep -q "not a supervised process"; then
+            log "the gate only answers the desktop; from a terminal run it yourself:"
+            log "    sudo $SELF --root write '$color' \$(find /etc -type d -path '*/policies/managed')"
+            return 1
+        fi
+        log "the gate answered: $(printf '%s' "$reply" | tail -n +2 | tr -d '\n ' | cut -c1-160)"
+        return $rc
+    fi
+    return 0
+}
+write_policy() { stage_gate; gate_run browser-theme-publish || return 1; }
+remove_policy() { gate_run browser-theme-clear || return 1; }
 
 # Skip the prompt when every policy file already holds the requested colour.
 policy_has() {
