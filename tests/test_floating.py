@@ -420,11 +420,23 @@ check('mon.reserved' in snap_qml and 'res[0]' in snap_qml and 'res[1]' in snap_q
 check('plugin:hyprbars:bar_height' in snap_qml and 'root.titleHeight = h' in snap_qml,
       "titlebar height is read from the live decoration setting")
 check('property var lastSnap' in snap_qml and 'function reapplySnap()' in snap_qml and
-      'if (moved) root.reapplySnap()' in snap_qml,
+      'root.reapplySnap()' in snap_qml,
       "snapped windows re-place themselves when the bar changes edge")
-check('function placeZones(preset, chosen, list)' in snap_qml and
-      'placeZones(preset, s.chosen, list)' in snap_qml,
-      "fresh snaps and bar-driven re-snaps share the same placement math")
+check('function placeZones(preset, chosen, list, monIdx)' in snap_qml and
+      'placeZones(preset, s.chosen, list, monIdx)' in snap_qml and
+      'root.zoneGeometryFor(monIdx === undefined ? root.targetMonitor : monIdx)' in snap_qml,
+      "fresh snaps and bar-driven re-snaps share placement math on the right monitor")
+check('function presetIndexOf(p)' in snap_qml and
+      'root.presetIndexOf(preset)' in snap_qml and
+      'root.presets[i].name === name' in snap_qml,
+      "layout buttons resolve their preset by name, not by a copied object's identity")
+check('function reflowFloating(previous, changed)' in snap_qml and
+      'root.reflowFloating(previous, changed)' in snap_qml and
+      'snapped.indexOf(addr) >= 0' in snap_qml,
+      "free floaters are moved out from under a relocated bar without disturbing snapped ones")
+check('g.y - root.titleHeight' in snap_qml and 'g.h + root.titleHeight' in snap_qml and
+      'newU.x + maxW - w' in snap_qml and 'newU.y + maxH - hVis' in snap_qml,
+      "free floaters keep their titlebar and whole body inside the usable area")
 check('Number(mon.width) / scale' in snap_qml and 'Number(mon.height) / scale' in snap_qml,
       "snap zones use logical pixels from the live monitor resolution and scale")
 check('hl.dsp.window.resize' in snap_qml and
