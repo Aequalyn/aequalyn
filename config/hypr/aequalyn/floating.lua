@@ -213,17 +213,14 @@ function F.load_decorations()
   end
   if F.decorations.attempted then return end
 
-  local plugin = type(hl.plugin) == "table" and hl.plugin.load or nil
+  -- Never load the plugin here: doing so during startup crashes Hyprland.
+  -- The plugin is loaded on demand (Super + Shift + T) via hyprctl, and
+  -- load_decorations() then only configures the already-loaded plugin.
+
   local file = io.open(DECOR_PLUGIN, "r")
   if file then file:close() end
-  if type(plugin) == "function" and file then
-    F.decorations.attempted = true
-    local ok, err = pcall(plugin, DECOR_PLUGIN)
-    if not ok then report("hyprbars load", err) end
-  end
 
-  -- Recheck instead of trusting the load call. If Hyprland cannot see the
-  -- plugin, stay quiet and leave decorations off.
+  -- If the plugin is already loaded, configure it; otherwise do nothing.
   if plugin_loaded() then
     F.decorations.loaded = true
     configure_decorations()
