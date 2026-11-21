@@ -130,7 +130,7 @@ local function plugin_loaded()
   if not ok or type(list) ~= "table" then return false end
   for _, p in ipairs(list) do
     local name = type(p) == "table" and (p.name or p.id) or p
-    if name == "hyprbars" then return true end
+    if type(name) == "string" and name:lower():find("hyprbars", 1, true) then return true end
   end
   return false
 end
@@ -161,6 +161,7 @@ local function configure_decorations()
   local ok, err = pcall(hl.config, {
     plugin = {
       hyprbars = {
+        enabled = true,
         bar_height = 26,
         bar_color = accent("e6"),
         col = { text = "rgba(f2f2f2ff)" },
@@ -440,6 +441,8 @@ function F.setup_drag_snap()
 end
 
 -- Register on module load too: the reloaded hook does not run on the first pass.
+F.load_decorations()
+F.setup_resize_hooks()
 F.setup_drag_snap()
 
 -- ---------------------------------------------------------------- minimize
