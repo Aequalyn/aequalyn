@@ -82,7 +82,8 @@ PALETTE = ["bgBase", "bgSurface", "bgHover", "bgSelected", "bgBorder", "textPrim
 HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 # the programs a plugin may start
 ALLOWED_PROGRAMS = {"qs", "hyprctl", "gsettings", "notify-send", "wl-copy", "wl-paste", "xdg-open",
-                    "brightnessctl", "wpctl", "pactl", "playerctl", "nmcli", "bluetoothctl"}
+                    "brightnessctl", "wpctl", "pactl", "playerctl", "nmcli", "bluetoothctl",
+                    "aequalyn-watchdog"}
 BANNED = [
     (r"\bXMLHttpRequest\b", "requests to the network"),
     (r"\b(eval|Function)\s*\(", "code built from strings (eval)"),
@@ -241,6 +242,39 @@ def builtin_ids():
     return set(re.findall(r"id:\s*\"([^\"]+)\"", p.read_text())) if p.exists() else set()
 
 
+ROOT_ACTION_ID_RE = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
+ROOT_LAUNCHERS = {"sudo", "pkexec", "su", "doas"}
+
+
+def clean_root_actions(raw, where):
+    """Validate a manifest's needsRoot the same way aequalyn-watchdog does
+    (it checks again before anything runs). A broken or sneaky action is
+    dropped; the command must be a fixed argv, never a shell, never sudo
+    itself (the gate adds sudo)."""
+    out = []
+    if not isinstance(raw, list):
+        return out
+    for a in raw[:8]:
+        if not isinstance(a, dict):
+            continue
+        aid, cmd = a.get("id", ""), a.get("command", [])
+        if not ROOT_ACTION_ID_RE.match(str(aid)) or not isinstance(cmd, list) or not (1 <= len(cmd) <= 64):
+            continue
+        argv = []
+        for x in cmd:
+            s = str(x)
+            if not s or len(s) > 512 or "\x00" in s or "\n" in s:
+                argv = []
+                break
+            argv.append(s)
+        if not argv or os.path.basename(argv[0]) in ROOT_LAUNCHERS:
+            continue
+        if any(x["id"] == aid for x in out):
+            continue
+        out.append({"id": str(aid), "label": str(a.get("label", aid))[:128], "command": argv})
+    return out
+
+
 # ---- per kind: check returns (id, meta) -------------------------------------------------
 def check_plugin(root, src, market):
     step("Checking the main files")
@@ -272,6 +306,19 @@ def check_plugin(root, src, market):
     no_escapes(root)
     scan_code(qml, root, ident)
     qmllint(qml, root)
+    # what it wants root for, checked and said out loud BEFORE anything is
+    # installed: the actions must be declared here (the command pinned in
+    # the manifest), because the watchdog's gate runs nothing else -- a
+    # plugin cannot pass a command in, ever. aequalyn-watchdog validates
+    # the same shape again before it ever runs one.
+    acts = clean_root_actions(man.get("needsRoot"), "plugin.json")
+    if acts:
+        say("")
+        step(f"This plugin asks for root: {len(acts)} action{'s' if len(acts) > 1 else ''}")
+        for a in acts:
+            say(f"   {a['label']}  \u2014  {' '.join(a['command'])}")
+        say("   Nothing runs as root until you approve it in the window that opens,")
+        say("   and the commands above are the only ones it can ever be.")
     return ident, {"label": man["label"], "version": man["version"], "repo": man.get("repo", src)}
 
 
