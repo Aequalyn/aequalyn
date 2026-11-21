@@ -1,3 +1,18 @@
 #!/bin/sh
 # GUI password prompt for sudo, used by the Aequalyn store.
-exec zenity --password --title="Aequalyn" --timeout=120
+# Says WHO is asking: the title names the program at the other end of the
+# call chain, so a password prompt can never look like "the system" asking
+# when it is really some plugin's helper. Reads /proc only.
+who=""
+p=$$
+for _ in 1 2 3 4 5; do
+    [ "$p" -le 1 ] && break
+    exe=$(readlink -f "/proc/$p/exe" 2>/dev/null) || break
+    name=${exe##*/}
+    [ -n "$name" ] && who="$name · $who"
+    p=$(awk '/^PPid:/{print $2}' "/proc/$p/status" 2>/dev/null) || break
+done
+who=${who% · }
+title="Aequalyn"
+[ -n "$who" ] && title="Aequalyn — password asked by: $who"
+exec zenity --password --title="$title" --timeout=120
