@@ -206,6 +206,7 @@ end
 
 function F.load_decorations()
   if NO_DECORATIONS then return end
+  if F.decorations.loaded then return end
   if plugin_loaded() then
     F.decorations.loaded = true
     configure_decorations()
