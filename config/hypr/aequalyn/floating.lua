@@ -64,11 +64,26 @@ function F.set_ws(ws, on)
   local id = tostring(ws)
   if on == nil then F.workspaces[id] = nil
   else F.workspaces[id] = on and true or false end
+  if fn("window_rule") then
+    local floating = (on == nil) and F.default or (on and true or false)
+    pcall(hl.window_rule, {
+      name = "aequalyn-hyprbar-ws-" .. id,
+      match = { workspace = id },
+      ["hyprbars:no_bar"] = not floating,
+    })
+  end
   F.apply()
 end
 
 function F.set_default(on)
   F.default = on and true or false
+  if fn("window_rule") then
+    pcall(hl.window_rule, {
+      name = "aequalyn-hyprbar-default",
+      match = { class = ".*" },
+      ["hyprbars:no_bar"] = not F.default,
+    })
+  end
   F.apply()
 end
 
@@ -194,12 +209,14 @@ local function configure_decorations()
     button("rgb(28c840)", "_", "hyprctl eval 'aequalyn_minimize_active()'")
   end
 
-  -- tiled windows keep the compositor's own decoration; bars belong to floaters
+  -- The titlebar belongs to floating workspaces only. The catch-all default
+  -- follows F.default; per-workspace rules (F.set_ws) override it, so a
+  -- window's bar tracks the floating state of its workspace, not its own.
   if fn("window_rule") then
     pcall(hl.window_rule, {
-      name = "aq-no-bar-tiled",
-      match = { float = false },
-      ["hyprbars:no_bar"] = true,
+      name = "aequalyn-hyprbar-default",
+      match = { class = ".*" },
+      ["hyprbars:no_bar"] = not F.default,
     })
   end
 end
