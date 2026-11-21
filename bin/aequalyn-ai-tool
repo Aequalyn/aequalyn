@@ -99,6 +99,53 @@ def available_command_path(tool_id: str) -> str:
     return ""
 
 
+def pacman_owner(path: str) -> str:
+    """The Arch package owning a system launcher, or '' when pacman has none."""
+    if not path:
+        return ""
+    try:
+        result = subprocess.run(["pacman", "-Qo", path], capture_output=True, text=True, check=False)
+    except OSError:
+        return ""
+    if result.returncode != 0:
+        return ""
+    line = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+    marker = " is owned by "
+    if marker not in line:
+        return ""
+    owner = line.split(marker, 1)[1].split()[0]
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@._+-")
+    return owner if owner and all(c in allowed for c in owner) else ""
+
+
+def npm_global_info(path: str) -> tuple[str, str]:
+    """(package, prefix) for a launcher inside a system-wide npm install."""
+    if not path:
+        return "", ""
+    marker = "/lib/node_modules/"
+    resolved = str(Path(path).resolve())
+    if marker not in resolved:
+        return "", ""
+    prefix, tail = resolved.split(marker, 1)
+    if prefix not in ("/usr", "/usr/local"):
+        return "", ""
+    parts = tail.split("/")
+    package = "/".join(parts[:2]) if parts[0].startswith("@") and len(parts) > 1 else parts[0]
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@._+-/")
+    return (package, prefix) if package and all(c in allowed for c in package) else ("", "")
+
+
+def external_management(path: str) -> dict[str, str]:
+    """How a system-wide launcher can be updated and removed, if at all."""
+    owner = pacman_owner(path)
+    if owner:
+        return {"manager": "pacman", "id": owner, "prefix": ""}
+    package, prefix = npm_global_info(path)
+    if package:
+        return {"manager": "npm", "id": package, "prefix": prefix}
+    return {"manager": "", "id": "", "prefix": ""}
+
+
 def set_default_tool(tool_id: str) -> int:
     if tool_id in ("", "none"):
         try:
@@ -169,6 +216,9 @@ def list_tools(as_json: bool) -> int:
         owned = managed_install(tool_id)
         collision = (launcher.exists() or launcher.is_symlink()) and not managed_link(tool_id)
         elsewhere = available_command_path(tool_id)
+        external = external_management(elsewhere) if elsewhere and not owned else {
+            "manager": "", "id": "", "prefix": ""
+        }
         row = {
             "id": tool_id,
             "name": tool["name"],
@@ -179,6 +229,9 @@ def list_tools(as_json: bool) -> int:
             "version": installed_version(tool_id) if owned else "",
             "availableElsewhere": bool(elsewhere) and not owned,
             "availablePath": elsewhere if elsewhere and not owned else "",
+            "systemManager": external["manager"],
+            "systemId": external["id"],
+            "systemPrefix": external["prefix"],
             "launcherConflict": collision and not owned,
             "default": tool_id == default_tool(),
         }
@@ -195,7 +248,7 @@ def list_tools(as_json: bool) -> int:
     return 0
 
 
-def run_npm(args: list[str]) -> int:
+def run_command(args: list[str], label: str = "command") -> int:
     try:
         process = subprocess.Popen(
             args,
@@ -205,12 +258,50 @@ def run_npm(args: list[str]) -> int:
             bufsize=1,
         )
     except OSError as exc:
-        print(f"Could not run npm: {exc}", file=sys.stderr)
+        print(f"Could not run {label}: {exc}", file=sys.stderr)
         return 127
     assert process.stdout is not None
     for line in process.stdout:
         print(line, end="", flush=True)
     return process.wait()
+
+
+def run_npm(args: list[str]) -> int:
+    return run_command(args, "npm")
+
+
+def external_tool_action(action: str, tool_id: str, external: dict[str, str]) -> int:
+    """Update or remove a launcher owned by pacman or a system-wide npm install."""
+    tool = TOOLS[tool_id]
+    manager, ident, prefix = external["manager"], external["id"], external["prefix"]
+    if manager == "pacman":
+        args = ["pacman", "-S", "--needed", ident] if action == "update" else ["pacman", "-Rns", ident]
+    elif manager == "npm":
+        if action == "update":
+            args = ["npm", "install", "--global", "--prefix", prefix, "--no-audit", "--no-fund",
+                    "--ignore-scripts=false", f"--allow-scripts={ident}", ident + "@latest"]
+        else:
+            args = ["npm", "uninstall", "--global", "--prefix", prefix,
+                    "--no-audit", "--no-fund", ident]
+    else:
+        print(f"{tool['name']} is installed outside Aequalyn and cannot be managed here.", file=sys.stderr)
+        return 1
+    if os.geteuid() != 0:
+        if not shutil.which("sudo"):
+            print("sudo is required to change a system-wide AI tool.", file=sys.stderr)
+            return 1
+        args = ["sudo", *args]
+    result = run_command(args, manager)
+    if result == 0 and action == "remove" and default_tool() == tool_id:
+        try:
+            DEFAULT_FILE.unlink(missing_ok=True)
+        except OSError as exc:
+            print(f"Removed {tool['name']}, but could not clear its default selection: {exc}", file=sys.stderr)
+            return 1
+    if result == 0:
+        verb = "Updated" if action == "update" else "Removed"
+        print(f"{verb} {tool['name']} from its system installation.")
+    return result
 
 
 def npm_command() -> list[str] | None:
@@ -243,6 +334,14 @@ def change_tool(action: str, tool_id: str) -> int:
     tool = TOOLS[tool_id]
     prefix, executable, launcher = tool_paths(tool_id)
     owned = managed_install(tool_id)
+
+    # A tool in /usr/bin still has a real owner: an Arch package or a global
+    # npm install. Use that owner instead of refusing just because Aequalyn did
+    # not install it itself.
+    if not owned and action in ("update", "remove"):
+        external = external_management(available_command_path(tool_id))
+        if external["manager"]:
+            return external_tool_action(action, tool_id, external)
 
     if action == "remove":
         if not managed_package(tool_id):
@@ -318,8 +417,12 @@ def change_tool(action: str, tool_id: str) -> int:
 
     prefix.mkdir(parents=True, exist_ok=True)
     package = tool["package"] + "@latest"
+    # npm 12 blocks lifecycle scripts unless the package is explicitly allowed;
+    # Claude Code and several other agents need postinstall to fetch their
+    # native binary, so allowing just this package keeps the install usable.
     npm_args = [*npm, "install", "--global", "--prefix", str(prefix),
-                "--no-audit", "--no-fund", "--ignore-scripts=false", package]
+                "--no-audit", "--no-fund", "--ignore-scripts=false",
+                f"--allow-scripts={tool['package']}", package]
     result = run_npm(npm_args)
     if result != 0:
         return result
