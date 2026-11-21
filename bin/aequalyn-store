@@ -816,11 +816,18 @@ PKG_RE = re.compile(r"^[A-Za-z0-9@._+-]{1,128}$")
 
 
 def http_json(url, data=None, headers=None):
+    import time
     import urllib.request
     req = urllib.request.Request(url, data=json.dumps(data).encode() if data is not None else None,
                                  headers=dict({"User-Agent": "aequalyn-store", "Content-Type": "application/json"}, **(headers or {})))
-    with urllib.request.urlopen(req, timeout=12) as r:
-        return json.loads(r.read().decode())
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=12) as r:
+                return json.loads(r.read().decode())
+        except Exception:
+            if attempt == 2:
+                raise
+            time.sleep(0.4 * (attempt + 1))
 
 
 def search_arch(q):
@@ -933,7 +940,8 @@ def _pacman_info(name):
 
 
 def _aur_info(name):
-    d = http_json("https://aur.archlinux.org/rpc/v5/info", {"args": [name]})
+    from urllib.parse import quote
+    d = http_json("https://aur.archlinux.org/rpc/v5/info/" + quote(name))
     hits = [r for r in d.get("results", [])
             if str(r.get("Name", "")).lower() == name.lower() or str(r.get("PackageBase", "")).lower() == name.lower()]
     if not hits:
@@ -1037,7 +1045,9 @@ def _snap_info(name):
 def do_app_info(q, ids=None):
     from concurrent.futures import ThreadPoolExecutor
     name = q.strip()[:80]
-    if not name or not PKG_RE.match(name):
+    # the display name can have spaces ("Visual Studio Code"); only backend ids
+    # need the strict package-name form
+    if not name or not re.match(r"^[A-Za-z0-9][A-Za-z0-9 ._+'-]{0,79}$", name):
         raise Fail("not an app name")
     # the app's page knows the id each backend uses (Flatpak's org.mozilla.firefox
     # is not "firefox"), so ask each one for that exact id when it is given
@@ -1050,6 +1060,10 @@ def do_app_info(q, ids=None):
                 "Flatpak": _flathub_info, "Snap": _snap_info}
     if explicit:
         jobs = {k: (lambda k=k: fetchers[k](ids[k])) for k in ids if ids[k]}
+        # a curated card may know no AUR id even though the AUR carries the app
+        # under its plain name; keep that version visible on every app page
+        if not ids["AUR"]:
+            jobs["AUR"] = lambda: _aur_info(name)
     else:
         jobs = {k: (lambda k=k: fetchers[k](name)) for k in fetchers}
     sources, errors = [], {}
