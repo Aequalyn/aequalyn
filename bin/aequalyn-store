@@ -54,7 +54,7 @@ A look is a set of visual settings, one piece or several: the bar's look, the do
 look, a cursor look (Plume), a lock screen design, the lock and sleep timings, and an
 SDDM login theme. Install keeps it; apply-look wears it, all of it or one piece.
 """
-import hashlib, json, os, re, shutil, subprocess, sys, tempfile
+import hashlib, json, os, pwd, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
 HOME = Path.home()
@@ -240,6 +240,49 @@ def scan_code(files, root, ident):
 def builtin_ids():
     p = SHELL / "Plugins.js"
     return set(re.findall(r"id:\s*\"([^\"]+)\"", p.read_text())) if p.exists() else set()
+
+
+# ---- the root gate's package halves ------------------------------------------
+# The Store's pacman rides the same gate as every plugin's root action: the
+# page stages what to do in the user's gate dir and calls
+# aequalyn-watchdog exec-root; the approval window decides; and THIS runs,
+# as root, with nothing from the user side trusted beyond strict validation.
+
+PKG_NAME_RE = re.compile(r"^[A-Za-z0-9@._+-]{1,128}$")
+
+
+def do_gate_pkg():
+    if os.geteuid() != 0:
+        raise Fail("gate-pkg needs root: the gate runs it, never a person")
+    user = os.environ.get("SUDO_USER", "")
+    if not user:
+        raise Fail("no SUDO_USER: not started by the gate")
+    try:
+        home = Path(pwd.getpwnam(user).pw_dir)
+    except KeyError:
+        raise Fail(f"no home for {user}")
+    stage = home / ".local" / "state" / "aequalyn" / "gate" / "pkg.json"
+    try:
+        d = json.loads(stage.read_text())
+    except (OSError, ValueError) as e:
+        raise Fail(f"the staged request is unreadable: {e}")
+    op, names = d.get("op", ""), d.get("packages", [])
+    if op not in ("install", "remove") or not isinstance(names, list) \
+            or not (1 <= len(names) <= 32):
+        raise Fail("the staged request is invalid")
+    for n in names:
+        if not PKG_NAME_RE.match(str(n)):
+            raise Fail(f"not a plain package name: {n}")
+    argv = (["pacman", "-S", "--needed", "--noconfirm"] if op == "install"
+            else ["pacman", "-Rns", "--noconfirm"]) + [str(n) for n in names]
+    step(("Installing " if op == "install" else "Removing ") + ", ".join(names))
+    r = subprocess.run(argv, capture_output=True, text=True)
+    if r.stdout.strip():
+        say(r.stdout.rstrip())
+    if r.stderr.strip():
+        say(r.stderr.rstrip())
+    if r.returncode != 0:
+        raise Fail(f"pacman exited {r.returncode}")
 
 
 ROOT_ACTION_ID_RE = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
@@ -1534,6 +1577,9 @@ def main(argv):
         if len(args) != 2:
             raise Fail("usage: open-appimage <file>")
         do_open_appimage(args[1])
+        return 0
+    if cmd == "gate-pkg":
+        do_gate_pkg()
         return 0
     if cmd == "set-appimage-handler":
         if len(args) != 1:
