@@ -212,7 +212,7 @@ info "config -> $TARGET/.config (what you changed stays as it is)"
 #     modules are part of Aequalyn, not something people tune by hand (that's user.lua):
 #     keep them current, and reload Hyprland so the running session uses them.
 if [[ "$SKIP_HYPR" -eq 1 && -d "$TARGET/.config/hypr/aequalyn" ]]; then
-    for f in geometry.lua layouts.lua keys.lua tiles.lua; do
+    for f in geometry.lua layouts.lua floating.lua keys.lua tiles.lua; do
         [[ -f "$ROOT/config/hypr/aequalyn/$f" ]] && cp "$ROOT/config/hypr/aequalyn/$f" "$TARGET/.config/hypr/aequalyn/$f"
     done
     # Backfill the generated webapps.lua include for installs that predate Web apps.

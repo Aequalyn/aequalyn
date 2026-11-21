@@ -151,7 +151,7 @@ for _, entry in ipairs(G.catalogue) do
 end
 
 -- the keys, and how these windows look (dofile, so `hyprctl reload` re-reads them too)
-for _, file in ipairs({ "keys.lua", "tiles.lua" }) do
+for _, file in ipairs({ "floating.lua", "keys.lua", "tiles.lua" }) do
   local ok, err = pcall(dofile, HOME .. "/.config/hypr/aequalyn/" .. file)
   if not ok then print("[aequalyn] " .. file .. ": " .. tostring(err)) end
 end
