@@ -52,10 +52,18 @@ the supervisor walks every plugin's process tree for exactly that, kills the
 attempt, and counts it; three strikes turn the plugin off. Only declared
 actions, each approved in the window with the password that feeds `sudo -S`,
 ever run as root, and "always allow" remembers consent (settings.json
-`rootAllowed`) while still asking for the password. The supervisor refuses to
-run as root itself; `aequalyn-watchdog test <id> esc` stages a rogue attempt
-so the tripwire can be watched. The full contract, with its honest limits
-(sampling, consent-and-audit rather than a hard sandbox), is in
+`rootAllowed`) while still asking for the password. The first-party flows
+ride the same gate — the browser colour policy (Theme's sync and the
+Settings toggle), the SDDM lock screen (theme, autologin, the pack's
+install) are declared on the `settings` built-in's line, and the Store's
+Arch packages (install, remove) on the `store` built-in's, so the
+approval window is the only password prompt the desktop ever shows.
+Flows that need a person at a keyboard (yay's build, snap's confinement
+questions, `aequalyn-update` itself) open a detached terminal instead —
+the user's own console, outside the supervised tree. The supervisor
+refuses to run as root itself; `aequalyn-watchdog test <id> esc` stages a
+rogue attempt so the tripwire can be watched. The full contract, with its
+honest limits (sampling, consent-and-audit rather than a hard sandbox), is in
 aequalyn-shell's `tools/watchdog/README.md`; `PLUGINS.md` is the author's side.
 
 ## Atelier: themes, wallpapers, rotation, palette
