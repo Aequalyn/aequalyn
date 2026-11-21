@@ -325,10 +325,14 @@ check('non_consuming = true' in float_lua and 'ignore_mods = true' in float_lua,
       "drag-tracking binds do not consume mouse input")
 
 # Right-aligned bars paint buttons right-to-left, so registration must be the
-# reverse of the wanted left-to-right order: close, maximize, minimize.
+# reverse of the wanted left-to-right order: red close, yellow maximize, green
+# minimize.
 registered = re.findall(r'button\("rgb\(([0-9a-f]{6})\)"', float_lua)
-check(registered[:3] == ["ff5f57", "28c840", "febc2e"],
-      "titlebar buttons register reversed to display minimize, maximize, close")
+check(registered[:3] == ["ff5f57", "febc2e", "28c840"],
+      "titlebar buttons register reversed to display green minimize, yellow maximize, red close")
+check('button("rgb(28c840)", "_"' in float_lua and
+      'button("rgb(febc2e)", "□"' in float_lua,
+      "green minimize uses _, yellow maximize uses a square")
 check('pcall(hl.on, "window.active", on_window_active)' in float_lua and
       'is_minimized_workspace(w.workspace)' in float_lua,
       "focusing a hidden window triggers a real restore, not just an overlay")

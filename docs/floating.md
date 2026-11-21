@@ -12,7 +12,8 @@ window-tagging API is unavailable, the module does nothing.
 
 Decorations are optional. When `~/.local/lib/aequalyn/hyprbars.so` exists and
 loads, floating windows get a titlebar with minimize, maximize and close
-buttons. A missing plugin, an older Hyprland, or
+buttons: green with `_` for minimize, yellow with a square for maximize, and red
+for close. A missing plugin, an older Hyprland, or
 `AEQUALYN_NO_FLOAT_DECORATIONS=1` simply leaves decorations off — none of them
 prevents the shell or compositor from starting.
 

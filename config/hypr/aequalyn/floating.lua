@@ -187,10 +187,11 @@ local function configure_decorations()
       })
     end
     -- hyprbars lays right-aligned buttons out right-to-left, so register them
-    -- in reverse to read minimize, maximize, close from left to right.
+    -- in reverse to read green minimize (_), yellow maximize (square), red close
+    -- from left to right.
     button("rgb(ff5f57)", "󰖭", "hyprctl eval 'aequalyn_close_active()'")
-    button("rgb(28c840)", "󰖤", "hyprctl eval 'aequalyn_maximize_active()'")
-    button("rgb(febc2e)", "󰖟", "hyprctl eval 'aequalyn_minimize_active()'")
+    button("rgb(febc2e)", "□", "hyprctl eval 'aequalyn_maximize_active()'")
+    button("rgb(28c840)", "_", "hyprctl eval 'aequalyn_minimize_active()'")
   end
 
   -- tiled windows keep the compositor's own decoration; bars belong to floaters
