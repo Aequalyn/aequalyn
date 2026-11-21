@@ -1,6 +1,7 @@
--- Aequalyn's layout keys, as in Tableau.
+-- Aequalyn's layout keys.
 --
 --   SUPER + L / SHIFT + L       the next / previous layout in your cycle (hyprland.lua)
+--   SUPER + CTRL + L, then f    Floating (windows you place yourself)
 --   SUPER + CTRL + L, then 1-9  Dwindle, Scrolling, Master, Portrait, Landscape,
 --                               Centerpiece, Diptych Left, Diptych Right, Mosaic
 --   SUPER + CTRL + L, 0, then   Strip, Column, Spiral, Gallery Right, Gallery Bottom,
@@ -151,7 +152,7 @@ function K.tab(dir)
   end
 end
 
--- SUPER + - / =: `grow` 1 for minus, -1 for equal (as Tableau);
+-- SUPER + - / =: `grow` 1 for minus, -1 for equal;
 -- `scale` makes the step finer (ALT) or coarser (CTRL). On Aequalyn's layouts the main
 -- pane changes by step() of the screen and keeps going while held; elsewhere the focused
 -- window is resized by `px`.
@@ -166,7 +167,7 @@ function K.resize(grow, scale, px)
   end
 end
 
--- SUPER + CTRL + L: pick a layout with a number, Tableau's numbering
+-- SUPER + CTRL + L: pick a layout with a number, using Aequalyn's numbering
 local PICK = { "dwindle", "scrolling", "master", "portrait", "landscape", "centerpiece",
                "diptych_left", "diptych_right", "mosaic" }
 local MORE = { { "1", "strip" }, { "2", "column" }, { "3", "spiral" }, { "4", "gallery_right" },
@@ -249,6 +250,7 @@ function K.apply()
     hl.define_submap("aq-layout-picker", function()
       for i, key in ipairs(PICK) do hl.bind(tostring(i), pick(key)) end
       hl.bind("0", function() hl.dispatch(hl.dsp.submap("aq-layout-picker-more")) end)
+      hl.bind("f", pick("floating"))
       hl.bind("Escape", hl.dsp.submap("reset"))
     end)
     hl.define_submap("aq-layout-picker-more", function()
