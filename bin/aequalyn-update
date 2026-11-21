@@ -202,7 +202,17 @@ main() {
     if command -v aequalyn-watchdog >/dev/null 2>&1 && aequalyn-watchdog status >/dev/null 2>&1; then
         # The supervisor owns the shell and the sandboxed plugin processes:
         # tell it, so the restart is planned (not counted as crashes), and the
-        # sandboxed plugins come back on the update's new code too.
+        # sandboxed plugins come back on the update's new code too. It is
+        # restarted too: stop leaves the desktop running while the old
+        # supervisor steps aside, start brings the freshly installed one back
+        # (it adopts the running shell), and restart-all then puts the shell
+        # and every plugin onto the new code as one planned restart. If the
+        # new binary cannot start, the stop marker goes with it, so the
+        # shell's keep-alive (ensure) is not left respecting a stale one.
+        aequalyn-watchdog stop >/dev/null 2>&1 || true
+        if ! aequalyn-watchdog start >/dev/null 2>&1; then
+            rm -f "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/aequalyn-watchdog.stopped" 2>/dev/null || true
+        fi
         aequalyn-watchdog restart-all >/dev/null 2>&1 || true
     else
         if pgrep -x qs >/dev/null 2>&1; then
