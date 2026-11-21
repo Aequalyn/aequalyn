@@ -20,7 +20,7 @@ local NO_DECORATIONS = os.getenv("AEQUALYN_NO_FLOAT_DECORATIONS") == "1"
 
 F.workspaces = {}                 -- workspace id -> true
 F.default = false
-F.decorations = { loaded = false, attempted = false }
+F.decorations = { loaded = false, attempted = false, retries = 0 }
 F._pending = false
 
 local function fn(name)
@@ -215,8 +215,12 @@ end
 
 function F.load_decorations()
   if NO_DECORATIONS then return end
-  if F.decorations.loaded then return end
-  if try_configure_decorations() then return end
+  if plugin_loaded() then
+    F.decorations.loaded = true
+    configure_decorations()
+    return
+  end
+  if F.decorations.attempted then return end
 
   local file = io.open(DECOR_PLUGIN, "r")
   if file then file:close() end
@@ -225,25 +229,14 @@ function F.load_decorations()
     return
   end
 
-  if not F.decorations.attempted then
-    F.decorations.attempted = true
-    F.decorations.retries = 0
-    local plugin = type(hl.plugin) == "table" and hl.plugin.load or nil
-    if type(plugin) == "function" then
-      local ok, err = pcall(plugin, DECOR_PLUGIN)
-      if not ok then report("hyprbars load", err) end
-    end
-  end
+  if F.decorations.attempted then return end
+  F.decorations.attempted = true
 
-  -- hl.plugin.load is a no-op on some Hyprland versions; fall back to the
-  -- compositor's own plugin loader. Defer it so config parsing is not blocked
-  -- (running hyprctl during a reload deadlocks the IPC socket).
-  if not plugin_loaded() and fn("timer") then
+  -- Load through the compositor's IPC instead of hl.plugin.load, which
+  -- triggers a config reload mid-startup and can crash Hyprland.
+  if fn("timer") and fn("exec_cmd") then
     pcall(hl.timer, function()
-      if not plugin_loaded() and fn("exec_cmd") then
-        pcall(hl.exec_cmd, "hyprctl plugin load " .. DECOR_PLUGIN)
-      end
-      -- configure once the (possibly deferred) load has registered the plugin
+      pcall(hl.exec_cmd, "hyprctl plugin load " .. DECOR_PLUGIN)
       local function finish()
         if try_configure_decorations() then return end
         if (F.decorations.retries or 0) < 10 and not F.decorations.loaded then
@@ -251,12 +244,9 @@ function F.load_decorations()
           pcall(hl.timer, finish, { timeout = 300, type = "oneshot" })
         end
       end
-      pcall(hl.timer, finish, { timeout = 500, type = "oneshot" })
-    end, { timeout = 500, type = "oneshot" })
-  elseif not plugin_loaded() and fn("exec_cmd") then
-    pcall(hl.exec_cmd, "hyprctl plugin load " .. DECOR_PLUGIN)
+      pcall(hl.timer, finish, { timeout = 1000, type = "oneshot" })
+    end, { timeout = 1000, type = "oneshot" })
   end
-
 end
 
 -- ------------------------------------------------------------- resize hooks
