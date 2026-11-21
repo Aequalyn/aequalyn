@@ -139,4 +139,10 @@ elif command -v hypridle >/dev/null 2>&1; then
     pgrep -x hypridle >/dev/null 2>&1 || hypridle >/dev/null 2>&1 &
 fi
 
+# Load the optional floating titlebar plugin only after Hyprland and the shell
+# are fully up. Loading it earlier (config parse / startup) crashes Hyprland.
+if [ -f "$HOME/.local/lib/aequalyn/hyprbars.so" ]; then
+    ( sleep 10; hyprctl plugin load "$HOME/.local/lib/aequalyn/hyprbars.so" >/dev/null 2>&1; sleep 1; hyprctl eval "_G.aequalyn_floating.load_decorations()" >/dev/null 2>&1 ) &
+fi
+
 log "session started at $(date '+%F %T')"
