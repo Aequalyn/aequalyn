@@ -55,7 +55,8 @@ hl.bind(M .. " + O",       hl.dsp.exec_cmd("qs ipc call monitors toggle"))
 hl.bind(M .. " + SHIFT + O", hl.dsp.exec_cmd("qs ipc call monitors refresh"))
 hl.bind(M .. " + SHIFT + C", hl.dsp.exec_cmd("qs ipc call idle toggle"))
 hl.bind(M .. " + CTRL + SHIFT + L", hl.dsp.exec_cmd("aequalyn-lock lock"), { description = "Lock screen" })
-hl.bind(M .. " + I",       hl.dsp.exec_cmd("sudo aequalyn-install"))
+hl.bind(M .. " + I",       hl.dsp.exec_cmd("qs ipc call installMenu toggle")) -- Install chooser
+hl.bind(M .. " + R",       hl.dsp.exec_cmd("qs ipc call removeMenu toggle")) -- Remove chooser
 hl.bind(M .. " + N",       hl.dsp.exec_cmd("qs ipc call notifications dismiss_all"))
 hl.bind(M .. " + SHIFT + N", hl.dsp.exec_cmd("qs ipc call notifications dnd_toggle"))
 hl.bind(M .. " + SHIFT + R", hl.dsp.exec_cmd("aequalyn-record toggle"))
