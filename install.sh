@@ -326,6 +326,38 @@ fi
 # install. Anything a previous run left is removed.
 rm -f "$TARGET/.local/share/applications/aequalyn-install.desktop"
 
+# 6b. Console apps (btop, nudu) open in a terminal: plant launchers that go
+# through xdg-terminal-exec so the user's preferred terminal is used.
+mkdir -p "$TARGET/.local/share/applications"
+cat > "$TARGET/.local/share/applications/btop.desktop" <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=btop++
+GenericName=System Monitor
+Comment=Resource monitor that shows usage and stats for processor, memory, disks, network and processes
+Icon=btop
+Exec=xdg-terminal-exec btop
+Terminal=false
+Categories=System;Monitor;ConsoleOnly;
+Keywords=system;process;task;monitor;btop;
+StartupNotify=false
+DESKTOP
+cat > "$TARGET/.local/share/applications/nudu.desktop" <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=nudu
+GenericName=Disk Usage Analyzer
+Comment=See what is using your disk, in the terminal
+Icon=drive-harddisk
+Exec=xdg-terminal-exec nudu
+Terminal=false
+Categories=System;Utility;ConsoleOnly;
+Keywords=disk;usage;du;space;storage;
+StartupNotify=false
+DESKTOP
+chmod 644 "$TARGET/.local/share/applications/btop.desktop" "$TARGET/.local/share/applications/nudu.desktop"
+
 # 7. Nautilus palette extension (live-reloaded by Aequalyn theme tools)
 if [[ -f "$ROOT/config/nautilus-python/extensions/aequalyn_palette.py" ]]; then
     mkdir -p "$TARGET/.local/share/nautilus-python/extensions"
