@@ -28,21 +28,14 @@ the decorated titlebar is counted inside that half, so the whole window starts
 at half the screen instead of only its client area. The window is sized once on
 open; later manual resizes are left alone.
 
-The snap flyout is a shell plugin. Leave the pointer in the top edge strip for a
-moment and it opens; dragging a floating window up to the same strip also opens
-it, and `Super + G` remains a manual alternative. Every layout is offered in a
-single row; clicking one switches the same popup to a larger chooser for that
-layout's areas. Click the area you want and the focused window is snapped there,
-with the other floating windows on that workspace filling the remaining areas.
-Clicking outside the flyout dismisses it without changing anything.
+The snap flyout is a shell plugin. `Super + G` is the only way to open it: there
+is no top-edge hover dwell and no drag-to-top trigger. Every layout is offered
+in a single row; clicking one switches the same popup to a larger chooser for
+that layout's areas. Click the area you want and the focused window is snapped
+there, with the other floating windows on that workspace filling the remaining
+areas. Clicking outside the flyout dismisses it without changing anything.
 
-The strip starts just below any bar or dock on the top edge; with those panels
-elsewhere it starts at the monitor's top edge. Hyprland's reserved top edge
-includes every exclusive layer there, so a bar and dock stacked together move
-the trigger down as one. No window needs to be dragged or pushed off screen.
-After a snap or cancel the flyout stays closed through the short cooldown that
-covers the window move, then re-arms once the pointer has left the strip. The
-area under the pointer when the flyout opened is preselected, and the final
+The flyout opens at the pointer, so the area under it is preselected. The final
 window geometry is derived from the monitor's current resolution, converted from
 physical to logical pixels with the live scale, so the placed window fills
 exactly the area shown in the flyout.
