@@ -64,7 +64,7 @@ function F.set_ws(ws, on)
   local id = tostring(ws)
   if on == nil then F.workspaces[id] = nil
   else F.workspaces[id] = on and true or false end
-  if fn("window_rule") then
+  if fn("window_rule") and plugin_loaded() then
     local floating = (on == nil) and F.default or (on and true or false)
     pcall(hl.window_rule, {
       name = "aequalyn-hyprbar-ws-" .. id,
@@ -116,7 +116,7 @@ function F.sweep()
   for _, w in ipairs(windows) do
     if w and w.address and w.mapped ~= false and w.workspace and not w.workspace.special then
       local want = F.is_ws(w.workspace)
-      if fn("window_rule") then
+      if fn("window_rule") and plugin_loaded() then
         local wsid = tostring(w.workspace.id or w.workspace)
         pcall(hl.window_rule, {
           name = "aequalyn-hyprbar-ws-" .. wsid,
@@ -222,6 +222,7 @@ function F.load_decorations()
   if plugin_loaded() then
     F.decorations.loaded = true
     configure_decorations()
+    pcall(F.apply)
     return
   end
   if F.decorations.attempted then return end
@@ -237,6 +238,7 @@ function F.load_decorations()
   if plugin_loaded() then
     F.decorations.loaded = true
     configure_decorations()
+    pcall(F.apply)
   else
     F.decorations.loaded = false
   end
