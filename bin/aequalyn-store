@@ -1168,12 +1168,26 @@ def _resolve_ids(name, ids):
                 ids[source] = ident
 
 
+def _words(value):
+    return {w for w in re.findall(r"[a-zA-Z]{4,}", str(value or "").lower())
+            if w not in {"with", "from", "that", "this", "your", "into", "more", "than"}}
+
+
+def _agrees(primary, other):
+    """A name-resolved source must describe the same app as the checked one."""
+    a = _words((primary.get("about") or "") + " " + (primary.get("description") or "")[:300])
+    b = _words((other.get("about") or "") + " " + (other.get("description") or "")[:300])
+    if not a or not b:
+        return True
+    return len(a & b) / float(min(len(a), len(b))) >= 0.15
+
+
 def do_app_info(q, ids=None):
     from concurrent.futures import ThreadPoolExecutor
     name = q.strip()[:80]
     # the display name can have spaces ("Visual Studio Code"); only backend ids
     # need the strict package-name form
-    if not name or not re.match(r"^[A-Za-z0-9._+][A-Za-z0-9 ._+'()-]{0,79}$", name):
+    if not name or not re.match(r"^[A-Za-z0-9._+][A-Za-z0-9 ._+ '()-]{0,79}$", name):
         raise Fail("not an app name")
     # the app's page knows the id each backend uses (Flatpak's org.mozilla.firefox
     # is not "firefox"), so ask each one for that exact id when it is given
@@ -1181,10 +1195,14 @@ def do_app_info(q, ids=None):
     for source, ident in ids.items():
         if ident and not PKG_RE.match(ident):
             raise Fail("not a package id: " + source)
+    given = {value for value in ids.values() if value}
     explicit = any(ids.values())
     fetchers = {"Arch": _pacman_info, "AUR": _aur_info,
                 "Flatpak": _flathub_info, "Snap": _snap_info}
     if explicit:
+        # category cards arrive with only the id their install button needs;
+        # resolve the other managers by name so their page matches All Apps
+        _resolve_ids(name, ids)
         jobs = {k: (lambda k=k: fetchers[k](ids[k])) for k in ids if ids[k]}
         # a curated card may know no AUR id even though the AUR carries the app
         # under its plain name; keep that version visible on every app page
@@ -1202,7 +1220,10 @@ def do_app_info(q, ids=None):
                     sources += got if isinstance(got, list) else [got]
             except Exception as e:
                 errors[k] = str(e)[:120]
-    sources.sort(key=lambda s: ["Arch", "AUR", "Flatpak", "Snap"].index(s["source"]))
+    primary = next((s for s in sources if s.get("id") in given), sources[0] if sources else {})
+    sources = [s for s in sources if s.get("id") in given or not primary or _agrees(primary, s)]
+    sources.sort(key=lambda s: (0 if s.get("id") in given else 1,
+                                ["Arch", "AUR", "Flatpak", "Snap"].index(s["source"])))
     app = {"key": name.lower(), "name": name, "icon": "", "about": "", "description": "",
            "screenshots": [], "sources": sources}
     for s in sources:
