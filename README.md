@@ -14,7 +14,7 @@ shell for [Hyprland](https://hyprland.org/), with wallpaper-driven
 - **Bar and docks** — the bar is painted behind its widgets as a band, a pill,
   isles or a pebble per widget, in 26 Aequalyn looks; up to 16 docks (4 per
   edge of each screen) wear the bar's look or one of their own, and 8
-  ensembles dress both at once. Set in **Atelier → Bar / Docks**
+  ensembles dress both at once. Set in the **Themes and wallpapers** picker → Bar / Docks
   (`settings.json` → `barStyle`, `~/.config/aequalyn/docks.json`); IPC
   `qs ipc call dock toggle|show|hide|add|settings <n>`.
 - **Bluetooth** — bar indicator (power toggle on click, Settings on right-click)
@@ -41,21 +41,21 @@ shell for [Hyprland](https://hyprland.org/), with wallpaper-driven
   [`limine-snapper-sync`](https://aur.archlinux.org/packages/limine-snapper-sync)
   from the AUR, so snapshots appear as a **Snapshots** submenu in the Limine
   boot menu. Both packages are pre-built into the ISO's offline repo.
-- **Atelier** — one picker for themes, wallpapers, rotation and palette
-  (`Super + T` / `Super + W`). Six layouts per collection (grid, carousel,
-  filmstrip, radial, list, spotlight) with live preview of themes on the whole
-  shell. Wallpapers can be static, cycle through the active theme's
-  backgrounds, run as a slideshow, follow the time of day, differ per
-  workspace or play as video (`mpvpaper`), with awww transitions on every
-  monitor. Colours follow the wallpaper or stay pinned to a theme, with a
-  choice of matugen scheme, contrast and dark / light / auto.
-- **37 window layouts** — 33 of Aequalyn's own (Portrait, Landscape,
+- **Themes and wallpapers picker** — the theme/wallpaper picker (Super + T / Super + W);
+  its former tabs are now control-center pages. Six layouts per collection (grid,
+  carousel, filmstrip, radial, list, spotlight) with live preview of themes on
+  the whole shell. Wallpapers can be static, cycle through the active theme's
+  backgrounds, run as a slideshow, follow the time of day, differ per workspace
+  or play as video (`mpvpaper`), with awww transitions on every monitor.
+  Colours follow the wallpaper or stay pinned to a theme, with a choice of
+  matugen scheme, contrast and dark / light / auto.
+- **38 window layouts** — 33 of Aequalyn's own (Portrait, Landscape,
   Centerpiece, Stage, Theatre, four Galleries, four Diptychs, Triptych, Bento,
   Hero, Corner, Panels, Ultrawide, Mosaic, Spread, Ledger, Shelves, Masonry,
   Quadrant, Twin Columns, Strip, Column, Spiral, Fibonacci, Golden, Pinwheel,
   Cascade) plus Hyprland's Dwindle, Master, Scrolling and Monocle. One per
   workspace, kept across reboots; `Super + L` steps through the ones you
-  keep in the cycle, `Super + Alt + L` shows them all in Atelier.
+  keep in the cycle, `Super + Alt + L` shows them all in the picker.
 - **Folder themes** — a palette plus backgrounds (`colors.toml` +
   `backgrounds/`) install as they are:
   `aequalyn-themes install <git-url>`.
@@ -76,7 +76,9 @@ shell for [Hyprland](https://hyprland.org/), with wallpaper-driven
 - **Installer** — hybrid offline/online, dual-boot, LUKS2, Btrfs subvolumes,
   Limine, package profiles, config-first `install.toml`, L1 hardware proposal.
 
-The full change log is in [`Aequalyn.md`](Aequalyn.md).
+The full change log is the git history of this and the sibling repos
+(`aequalyn-shell`, `aequalyn-installer`, `aequalyn-iso`, `aequalyn-pkgs`,
+`aequalyn-themes`, `aequalyn-store`).
 
 ## Repositories
 
@@ -85,7 +87,7 @@ Aequalyn is split across the [Aequalyn](https://github.com/Aequalyn) organisatio
 | Repository | What it holds | Installed to |
 | --- | --- | --- |
 | [aequalyn](https://github.com/Aequalyn/aequalyn) | `aequalyn-*` commands, default config, `install.sh` | `~/.local/bin`, `~/.config` |
-| [aequalyn-shell](https://github.com/Aequalyn/aequalyn-shell) | Quickshell desktop: shaped bar, up to 16 docks, launcher, Atelier, settings | `~/.config/quickshell` |
+| [aequalyn-shell](https://github.com/Aequalyn/aequalyn-shell) | Quickshell desktop: shaped bar, up to 16 docks, launcher, themes and wallpapers picker, settings | `~/.config/quickshell` |
 | [aequalyn-themes](https://github.com/Aequalyn/aequalyn-themes) | Folder themes (palette + backgrounds) | `~/.local/share/aequalyn/themes` |
 | [aequalyn-installer](https://github.com/Aequalyn/aequalyn-installer) | `aequalyn-install` TUI, `aequalyn-detect`, `install.toml` | live ISO `/opt/aequalyn/installer` |
 | [aequalyn-iso](https://github.com/Aequalyn/aequalyn-iso) | archiso profile, `aequalyn-iso-make`, `aequalyn-iso-test` | — |
@@ -116,6 +118,7 @@ aequalyn-theme ~/Pictures/Wallpapers/beach.jpg
 
 Dependencies: `quickshell`, `matugen`, `awww`, `hyprland`, `jq`, `brightnessctl`,
 `playerctl`, `ttf-jetbrains-mono-nerd`, plus the Qt6/GTK runtime. See
+`aequalyn-pkgs` (`lists/desktop.packages`); in the assembled ISO tree this is
 `packages/desktop.packages`.
 
 ## Updating and migrations
@@ -196,12 +199,12 @@ languages, mise, npm and uv; the Store can add packages to an existing system.
 | `Super + Space` | Programs menu: browse applications and CLI tools by category |
 | `Super + ,` / gear in bar | Aequalyn settings |
 | `apps-menu` Arch logo in bar | App launcher |
-| `Super + T` / `Super + Ctrl + Shift + Space` | Atelier: themes |
-| `Super + W` | Atelier: wallpapers |
-| `Super + Shift + W` | Atelier: rotation |
+| `Super + T` / `Super + Ctrl + Shift + Space` | Themes and wallpapers: themes |
+| `Super + W` | Themes and wallpapers: wallpapers |
+| `Super + Shift + W` | Themes and wallpapers: rotation |
 | `Super + Ctrl + Space` | Next wallpaper |
 | `Super + L` / `Super + Shift + L` | Next / previous window layout |
-| `Super + Alt + L` | Atelier: layouts |
+| `Super + Alt + L` | Themes and wallpapers: layouts |
 | `Super + Ctrl + L`, then `1`–`9` | Dwindle, Scrolling, Master, Portrait, Landscape, Centerpiece, Diptych Left, Diptych Right, Mosaic |
 | `Super + Ctrl + L`, `0`, then `1`–`0`, `-`, `=` | Strip, Column, Spiral, Gallery Right, Gallery Bottom, Gallery Left, Gallery Top, Spread, Diptych Top, Diptych Bottom, Triptych, Bento |
 | `Super + Z` | Make the focused window the main one |
@@ -245,7 +248,7 @@ aequalyn-layout option pane 0.66
 
 ![Every layout with five windows](docs/layouts/all-layouts.jpg)
 
-Everything Atelier does goes through these commands, so a keybind, a script
+Everything the picker does goes through these commands, so a keybind, a script
 or an agent gets the same result as the picker.
 
 ## Credits
@@ -256,3 +259,10 @@ or an agent gets the same result as the picker.
 
 This project is licensed under the GNU General Public License v3.0 (GPL-3.0).
 See [LICENSE](LICENSE) for the full text.
+
+## Documentation
+
+- `SECURITY.md` — security model and concerns.
+- `SKILL.md` — development/install skill reference.
+- `PLUGINS.md` — plugins (core side).
+- `THEMES.md` — themes (core side).
