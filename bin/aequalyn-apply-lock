@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# aequalyn-apply-lock -- install the PAM stacks used by the Aequalyn lock plugin.
+#
+# The Quickshell lock plugin authenticates through PAM directly. It needs two
+# service definitions in /etc/pam.d, which are root-owned, so this script is the
+# one-shot installer:
+#
+#     sudo "$HOME/.local/bin/aequalyn-apply-lock"
+#
+# It installs:
+#   /etc/pam.d/aequalyn-lock-password   (always; password + faillock + homed)
+#   /etc/pam.d/aequalyn-lock-fingerprint (only if fprintd is usable and enrolled)
+#
+# The plugin refuses to lock when the password stack is absent, so the desktop
+# stays usable if installation was skipped; it just cannot lock yet.
+set -euo pipefail
+
+# sudo keeps a minimal environment: resolve the templates from the desktop
+# user's home, not root's, so `sudo /home/.../aequalyn-apply-lock` works.
+invoker="${SUDO_USER:-$USER}"
+invoker_home=$(getent passwd "$invoker" 2>/dev/null | cut -d: -f6)
+[[ -n "$invoker_home" ]] || invoker_home="$HOME"
+TEMPLATE_DIR="${XDG_CONFIG_HOME:-$invoker_home/.config}/quickshell/plugins/lock/pam"
+PAM_DIR="/etc/pam.d"
+PASSWORD_SERVICE="aequalyn-lock-password"
+FINGERPRINT_SERVICE="aequalyn-lock-fingerprint"
+
+usage() {
+    awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
+}
+
+status() {
+    for service in "$PASSWORD_SERVICE" "$FINGERPRINT_SERVICE"; do
+        if [[ -r "$PAM_DIR/$service" ]]; then
+            printf 'installed  %s\n' "$PAM_DIR/$service"
+        else
+            printf 'missing    %s\n' "$PAM_DIR/$service"
+        fi
+    done
+}
+
+case "${1:-}" in
+    --help|-h) usage; exit 0 ;;
+    --status|-s) status; exit 0 ;;
+    --templates)
+        echo "$TEMPLATE_DIR"
+        ls -l "$TEMPLATE_DIR/$PASSWORD_SERVICE" "$TEMPLATE_DIR/$FINGERPRINT_SERVICE"
+        exit 0 ;;
+    "") ;;
+    *) echo "aequalyn-apply-lock: unknown option: $1" >&2; exit 2 ;;
+esac
+
+if (( EUID != 0 )); then
+    echo "Root is required to write $PAM_DIR." >&2
+    echo "Run from your desktop user: sudo \"\$HOME/.local/bin/aequalyn-apply-lock\"" >&2
+    exit 1
+fi
+
+if [[ ! -r "$TEMPLATE_DIR/$PASSWORD_SERVICE" ]]; then
+    echo "Missing template: $TEMPLATE_DIR/$PASSWORD_SERVICE" >&2
+    exit 1
+fi
+
+# Resolve the real user behind sudo. Root's HOME is not the desktop user's.
+target_user="${SUDO_USER:-${USER:-}}"
+if [[ -z "$target_user" || "$target_user" == "root" ]]; then
+    echo "Run this through sudo from the desktop user's session." >&2
+    exit 1
+fi
+
+install -D -m 0644 -o root -g root \
+    "$TEMPLATE_DIR/$PASSWORD_SERVICE" "$PAM_DIR/$PASSWORD_SERVICE"
+echo "Installed $PAM_DIR/$PASSWORD_SERVICE"
+
+# Fingerprint is optional: no fprintd module, no stack. A stale stack would make
+# the plugin show a fingerprint icon that can never authenticate, so remove it.
+fingerprint_ok=0
+module_dir=""
+for dir in /usr/lib/security /usr/lib64/security /usr/lib/x86_64-linux-gnu/security; do
+    if [[ -f "$dir/pam_fprintd.so" ]]; then module_dir="$dir"; break; fi
+done
+if [[ -n "$module_dir" ]] && command -v fprintd-list >/dev/null 2>&1; then
+    target_uid=$(id -u "$target_user" 2>/dev/null || echo "")
+    runtime_dir=""
+    if [[ -n "$target_uid" ]]; then
+        runtime_dir="/run/user/$target_uid"
+        if [[ -d "$runtime_dir" ]]; then
+            prints=$(XDG_RUNTIME_DIR="$runtime_dir" \
+                runuser -u "$target_user" -- fprintd-list "$target_user" 2>/dev/null || true)
+            if [[ "$prints" =~ -\ # ]]; then fingerprint_ok=1; fi
+        fi
+    fi
+fi
+
+if (( fingerprint_ok )); then
+    install -D -m 0644 -o root -g root \
+        "$TEMPLATE_DIR/$FINGERPRINT_SERVICE" "$PAM_DIR/$FINGERPRINT_SERVICE"
+    echo "Installed $PAM_DIR/$FINGERPRINT_SERVICE"
+else
+    if [[ -e "$PAM_DIR/$FINGERPRINT_SERVICE" ]]; then
+        rm -f "$PAM_DIR/$FINGERPRINT_SERVICE"
+        echo "Removed unused $PAM_DIR/$FINGERPRINT_SERVICE (no enrolled fingerprint)"
+    else
+        echo "Skipped fingerprint stack (fprintd unavailable or no prints enrolled)"
+    fi
+fi
+
+echo
+status

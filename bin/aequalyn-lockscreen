@@ -1,13 +1,13 @@
 #!/bin/bash
-# aequalyn-lockscreen: how the screen looks while it is locked (hyprlock), one of the
-# ready-made designs in ~/.config/hypr/lockscreens, drawn in the current theme's colours
-# over the current wallpaper.
+# aequalyn-lockscreen: legacy hyprlock theme renderer, kept for reference and
+# for the SDDM login theme. The session lock is the Quickshell `lock` plugin:
+# `apply` only refreshes the cached wallpaper path, `try` locks through the plugin.
 #
 #   aequalyn-lockscreen list            the designs
 #   aequalyn-lockscreen apply [name]    write ~/.config/hypr/hyprlock.conf from the one
 #                                       chosen in Settings (or `name`); "classic" is the
 #                                       one made from the wallpaper
-#   aequalyn-lockscreen try <name>      lock now with that design, to see it
+#   aequalyn-lockscreen try <name>      lock now with the Quickshell lock screen
 #
 # The colours come from ~/.config/aequalyn/lock-palette.json, which the shell writes
 # whenever the theme changes; the wallpaper is the one on the screen now (a still of it
@@ -93,13 +93,8 @@ case "${1:-}" in
         mv -f "$tmp" "$OUT"
         ;;
     try)
-        name=${2:-$(chosen)}
-        if [[ "$name" == classic && ! -f "$DIR/classic.conf" ]]; then exec hyprlock; fi
-        [[ "$name" =~ ^[a-z0-9-]+$ && -f "$DIR/$name.conf" ]] || { echo "aequalyn-lockscreen: no design '$name'" >&2; exit 1; }
-        tmp=$(mktemp "${XDG_RUNTIME_DIR:-/tmp}/aequalyn-lock.XXXXXX")
-        render "$name" "$tmp"
-        pidof hyprlock >/dev/null || hyprlock -c "$tmp"
-        rm -f "$tmp"
+        # hyprlock is retired: the Quickshell lock plugin owns the session now.
+        exec "$HOME/.local/bin/aequalyn-lock" lock
         ;;
     *)
         sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'

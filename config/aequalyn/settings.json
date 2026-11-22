@@ -198,6 +198,7 @@
     "osd",
     "monitorManager",
     "idleInhibitor",
+    "lock",
     "clipscape",
     "powerMenu",
     "docks",

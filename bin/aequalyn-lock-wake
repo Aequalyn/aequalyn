@@ -1,0 +1,10 @@
+#!/bin/bash
+# aequalyn-lock-wake -- undo what the lock did to the display.
+# Called by the Quickshell lock service on successful authentication.
+set -u
+export PATH="$HOME/.local/bin:$PATH"
+
+aequalyn-dpms on >/dev/null 2>&1 || true
+# A stale scanout frame (the lock screen on a secondary monitor) survives DPMS
+# transitions on some drivers; forcing a repaint clears it.
+aequalyn-repaint >/dev/null 2>&1 || true

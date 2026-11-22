@@ -1,0 +1,53 @@
+#!/bin/bash
+# aequalyn-lock -- talk to the Aequalyn Quickshell session lock.
+#
+#   aequalyn-lock lock          lock now
+#   aequalyn-lock lockForSleep  lock with the pre-suspend run-up
+#   aequalyn-lock status        JSON lock status
+#   aequalyn-lock isLocked      locked / unlocked
+#   aequalyn-lock check         ok / missing-pam
+#   aequalyn-lock wake          restore the display after unlocking
+#   aequalyn-lock wait-secure [seconds]   wait until the compositor holds the lock
+set -euo pipefail
+export PATH="$HOME/.local/bin:$PATH"
+
+TARGET=lock
+QUIET=0
+if [[ ${1:-} == "-q" || ${1:-} == "--quiet" ]]; then
+    QUIET=1
+    shift
+fi
+
+call() {
+    local method=$1
+    shift
+    if (( QUIET )); then
+        qs ipc call -- "$TARGET" "$method" "$@" >/dev/null 2>&1 || true
+        return 0
+    fi
+    exec qs ipc call -- "$TARGET" "$method" "$@"
+}
+
+case "${1:-status}" in
+    lock|lockForSleep|status|isLocked|check|wake|noteSleep)
+        call "$1" ;;
+    wait-secure)
+        limit=${2:-12}
+        deadline=$((SECONDS + limit))
+        while (( SECONDS < deadline )); do
+            if status=$(qs ipc call -- "$TARGET" status 2>/dev/null) \
+               && jq -e '.secure == true' <<<"$status" >/dev/null 2>&1; then
+                echo secure
+                exit 0
+            fi
+            sleep 0.1
+        done
+        if (( QUIET )); then exit 0; fi
+        echo "aequalyn-lock: session lock did not become secure in ${limit}s" >&2
+        exit 1 ;;
+    -h|--help|help)
+        awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0" ;;
+    *)
+        echo "aequalyn-lock: unknown command: $1" >&2
+        exit 2 ;;
+esac

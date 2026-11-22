@@ -1,0 +1,33 @@
+#!/bin/bash
+# aequalyn-lock-stranded -- is an active Hyprland session lock orphaned?
+#
+# Exit codes:
+#   0  a lock is held and no live locker process owns it (stranded)
+#   1  no lock is held
+#   2  undetermined (Hyprland IPC failed, or another locker is running)
+#
+# Hyprland does not expose a lock boolean. An active ext-session-lock shows up
+# as LOCK in monitors[].solitaryBlockedBy, and that marker outlives a dead lock
+# client. With misc:allow_session_lock_restore = true, a restarted shell must
+# not take over a lock that still belongs to another locker.
+set -u
+
+monitors=$(hyprctl -j monitors 2>/dev/null) || exit 2
+jq -e 'type == "array"' <<<"$monitors" >/dev/null 2>&1 || exit 2
+
+locks=$(jq '[.[] | select((.solitaryBlockedBy // []) | index("LOCK"))] | length' <<<"$monitors" 2>/dev/null) || exit 2
+
+if (( locks > 0 )); then
+    if [[ -n ${1:-} ]]; then
+        others=$(pgrep -u "$UID" -x 'quickshell|qs|hyprlock' 2>/dev/null | grep -vxF "$1" || true)
+        [[ -n "$others" ]] && exit 2
+    fi
+    exit 0
+fi
+
+# A readable monitor with no WORKSPACE blocker means there is no lock at all.
+if jq -e 'any(.[]; ((.solitaryBlockedBy // []) | index("WORKSPACE")) == null)' \
+   <<<"$monitors" >/dev/null 2>&1; then
+    exit 1
+fi
+exit 2
