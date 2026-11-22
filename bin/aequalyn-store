@@ -18,7 +18,8 @@
                                           and Snap's featured)
   aequalyn-store app-info <name> [--arch ID] [--aur ID] [--flatpak ID] [--snap ID]
                                           one app's page: every source, version and detail,
-                                          fetched from the package managers, as JSON
+                                          fetched from the package managers, as JSON; sources
+                                          with no id are resolved by name first
   aequalyn-store apply-look <id> [--piece all|bar|dock|cursor|lock|sleep|sddm]
   aequalyn-store check-appimage <file>     a real AppImage? its name and icon, read without running it
   aequalyn-store import-appimage <file>    move it to ~/Applications, give it a menu entry
@@ -1042,12 +1043,137 @@ def _snap_info(name):
     }
 
 
+def _name_key(value):
+    """A display name and a package id compare the same way: letters and digits only."""
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+PKG_SUFFIXES = ("bin", "git", "stable", "desktop", "desktopeditors", "edition",
+                "appimage", "cli", "community", "launcher")
+
+
+def _same_pkg(key, found):
+    """A package name with only a packaging suffix is still the same app."""
+    if not key or not found:
+        return False
+    if found == key:
+        return True
+    return any(suffix and found == key + suffix for suffix in PKG_SUFFIXES)
+
+
+def _hit_id(hits, name_keys, id_keys, source):
+    """Pick the one id a manager's search actually meant, never a nearby app.
+
+    Compare whole names only. "Notion" must not become notion-snap-reborn, and
+    "Kitty" must not become kitty-img, just because an id starts with that word.
+    Known packaging suffixes (-bin, -git, Desktop Editors) are the exception.
+    """
+    rows = []
+    for hit in hits or []:
+        ident = str(hit.get("id") or "").strip()
+        if not PKG_RE.match(ident):
+            continue
+        shown = _name_key(hit.get("name"))
+        packed = _name_key(ident)
+        parts = [p for p in re.split(r"[^A-Za-z0-9]+", ident) if p]
+        last = _name_key(parts[-1]) if parts else ""
+        rows.append((ident, shown, packed, last))
+    # an exact name is always better than a -git or -bin build of one. A search
+    # hit with its own display name must agree with the app we are resolving:
+    # Arch's "notion" is a tiling window manager, not Notion the note app.
+    for ident, shown, packed, last in rows:
+        if shown and not any(key in shown for key in name_keys + id_keys):
+            continue
+        name_hit = any(key in (shown, packed) for key in name_keys)
+        id_hit = any(key in (shown, packed) for key in id_keys)
+        # With a checked id in hand, a bare name match is not enough: Arch's
+        # "notion" is a window manager while the card means Notion the note app.
+        if name_hit and id_keys and not id_hit:
+            continue
+        if name_hit or id_hit:
+            return ident
+    # a checked id from the install button can carry the exact spelling the
+    # store uses even when the display name does not ("onlyoffice-bin")
+    for ident, shown, packed, last in rows:
+        keys = id_keys if id_keys else name_keys
+        if any(_same_pkg(key, value) for key in keys for value in (shown, packed)):
+            return ident
+    # Flatpak ids are reverse DNS: org.mozilla.firefox is still Firefox. A long
+    # id checked by the install button is also trusted as one of its parts.
+    if source == "Flatpak":
+        for ident, shown, packed, last in rows:
+            parts = [_name_key(p) for p in re.split(r"[^A-Za-z0-9]+", ident) if p]
+            if last and last in name_keys:
+                return ident
+            if any(len(key) >= 8 and key in parts for key in id_keys):
+                return ident
+    return ""
+
+
+def _id_keys(ident):
+    """The useful spellings of one package id, without its packaging suffixes."""
+    parts = re.split(r"[^A-Za-z0-9]+", str(ident or ""))
+    parts = [p for p in parts if p]
+    if not parts:
+        return []
+    kept = [p for p in parts if p.lower() not in
+            ("bin", "git", "stable", "desktop", "appimage", "cli", "gtk")]
+    return list(dict.fromkeys(k for k in (
+        _name_key(" ".join(parts)), _name_key(" ".join(kept)),
+        _name_key(parts[-1]), _name_key(" ".join(kept[-2:]))
+    ) if len(k) >= 2))
+
+
+def _resolve_ids(name, ids):
+    """A curated card may know one id; All Apps learns the rest from a live search.
+
+    Do the same here: look the app up in every manager we have no id for, then
+    hand the exact ids to app-info. Checked ids are never replaced.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    searches = {
+        "Arch": search_arch,
+        "AUR": search_aur,
+        "Flatpak": lambda q: search_flathub(q, 1)[0],
+        "Snap": search_snap,
+    }
+    name_keys = [_name_key(name)]
+    id_keys = []
+    for ident in ids.values():
+        id_keys += _id_keys(ident)
+    name_keys = list(dict.fromkeys(k for k in name_keys if len(k) >= 2))
+    id_keys = list(dict.fromkeys(k for k in id_keys if len(k) >= 2))
+    # the display name is what the app is called everywhere; a first word helps
+    # with labels like "Heroic (Epic Games)", but a package id is not a search
+    # term and must never pull in a different app
+    queries = [name]
+    first = next((p for p in re.split(r"[^A-Za-z0-9]+", name) if len(p) >= 3), "")
+    if first and first.lower() != name.lower():
+        queries.append(first)
+    missing = [source for source in ("Arch", "AUR", "Flatpak", "Snap") if not ids[source]]
+
+    def find(source):
+        for query in queries[:3]:
+            try:
+                ident = _hit_id(searches[source](query), name_keys, id_keys, source)
+            except Exception:
+                continue
+            if ident:
+                return source, ident
+        return source, ""
+
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        for source, ident in ex.map(find, missing):
+            if ident:
+                ids[source] = ident
+
+
 def do_app_info(q, ids=None):
     from concurrent.futures import ThreadPoolExecutor
     name = q.strip()[:80]
     # the display name can have spaces ("Visual Studio Code"); only backend ids
     # need the strict package-name form
-    if not name or not re.match(r"^[A-Za-z0-9][A-Za-z0-9 ._+'-]{0,79}$", name):
+    if not name or not re.match(r"^[A-Za-z0-9._+][A-Za-z0-9 ._+'()-]{0,79}$", name):
         raise Fail("not an app name")
     # the app's page knows the id each backend uses (Flatpak's org.mozilla.firefox
     # is not "firefox"), so ask each one for that exact id when it is given
