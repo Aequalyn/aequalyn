@@ -308,21 +308,10 @@ check('local kind = type(t)' in float_lua and
 check('titlebar_height()' in float_lua and
       'plugin:hyprbars:bar_height' in float_lua,
       "the decorated titlebar is included inside the starting half-screen size")
-check('function F.setup_drag_snap()' in float_lua and 'F.setup_drag_snap()' in float_lua,
-      "compositor tracks the primary button to detect drag-to-top")
-check('snap dragTop' in float_lua,
-      "drag gesture opens the shell snap picker")
-check('snap drop' not in float_lua,
-      "releasing the drag leaves the picker open for choices")
-check('function window_at_cursor()' in float_lua,
-      "drag tracks the window under the pointer, not just the focused one")
-check('drag.start_x' in float_lua and 'drag.start_y' in float_lua and
-      'dx * dx + dy * dy < 30 * 30' in float_lua,
-      "a click on the picker cannot be mistaken for a drag after a snap")
-check('hl.timer, register_drag_binds' in float_lua,
-      "drag binds are registered after other config binds are cleared")
-check('non_consuming = true' in float_lua and 'ignore_mods = true' in float_lua,
-      "drag-tracking binds do not consume mouse input")
+check('F.setup_drag_snap()' not in float_lua and 'snap dragTop' not in float_lua and
+      'local drag =' not in float_lua and 'register_drag_binds' not in float_lua and
+      'function window_at_cursor()' not in float_lua,
+      "Super + G is the only snap trigger; no drag-to-top tracking remains")
 
 # Right-aligned bars paint buttons right-to-left, so registration must be the
 # reverse of the wanted left-to-right order: red close, yellow maximize, green
@@ -390,20 +379,14 @@ check('function pick(' not in snap_qml and 'function state(' not in snap_qml and
       'function mark(' not in snap_qml and 'trace' not in snap_qml and
       'SNAPDBG' not in snap_qml and 'SNAPCUR' not in snap_qml,
       "no temporary verification hooks are left in the flyout")
-check('function beginDragSnap()' in snap_qml and 'function endDragSnap()' in snap_qml,
-      "drag-to-top can open and close the snap picker")
+check('function beginDragSnap()' not in snap_qml and 'function endDragSnap()' not in snap_qml,
+      "the flyout is not opened by a drag")
 check('onClicked: root.hide()' in snap_qml and 'anchors.fill: parent' in snap_qml,
       "clicking outside the picker dismisses it")
-check('property bool snapArmBlocked' in snap_qml and
-      'property double blockedAt' in snap_qml and
-      'root.snapArmBlocked = true' in snap_qml and
-      'root.blockedAt = Date.now()' in snap_qml and
-      'Date.now() - root.blockedAt > 1200' in snap_qml,
-      "one drag opens the picker once; a snap/cancel latches it through the async move")
-check('function dragCandidate()' in snap_qml and 'const c = root.dragCandidate()' in snap_qml,
-      "snap grid targets the window under the pointer")
-check('property string dragAddr' in snap_qml and 'root.dragAddr = norm(c.address)' in snap_qml,
-      "the dragged window stays the snap target while picking a zone")
+check('snapArmBlocked' not in snap_qml and 'blockedAt' not in snap_qml and
+      'dragCandidate()' not in snap_qml and 'dragAddr' not in snap_qml and
+      'dragSnap' not in snap_qml,
+      "no drag/hover latch or pointer candidate remains in the flyout")
 check('function targetGeometry()' in snap_qml and 'root.targetGeometry()' in snap_qml,
       "snap zones use the live monitor geometry")
 check('function zoneGeometry()' in snap_qml and 'const g = root.zoneGeometry()' in snap_qml,
@@ -453,40 +436,24 @@ check('triggeredOnStart: true' in snap_qml,
       "poll timer starts immediately")
 check('on_double_click = "hyprctl eval' in float_lua,
       "titlebar double-click uses the working Lua dispatcher path")
-check('function snapTopEdge(mon)' in snap_qml and
-      'return Number((mon && mon.y) || 0) + reservedTop' in snap_qml and
-      'function inTopStrip(mon)' in snap_qml and
-      'root.cursorY >= monY - 12 && root.cursorY <= root.snapTopEdge(mon) + 56' in snap_qml,
-      "top strip follows the usable top edge, including a top bar or dock")
-check('function beginEdgeSnap(monIdx)' in snap_qml and
-      'function monitorAtCursor()' in snap_qml and
-      'readonly property int hoverDwellMs: 180' in snap_qml and
-      'Date.now() - root.hoverEnteredAt >= root.hoverDwellMs' in snap_qml,
-      "dwelling in the top strip opens the flyout without dragging anything")
+check('function inTopStrip(mon)' not in snap_qml and
+      'hoverDwellMs' not in snap_qml and 'hoverEnteredAt' not in snap_qml and
+      'function beginEdgeSnap(monIdx)' not in snap_qml,
+      "no top-edge hover or drag strip opens the flyout")
 check('atEdge && onWindow && !root.wasAtEdge' not in snap_qml and
       'const inMax =' not in snap_qml and 'y >= topLine - 8' not in snap_qml,
       "no maximize-corner or geometry-only opener remains")
-check('function dragTop(): void' in snap_qml and 'snap dragTop' in float_lua,
-      "drag-to-top still opens the snap list")
-check('py < mon_y - 12 or py > strip' in float_lua and
-      'drag.start_y - py <= 12' in float_lua,
-      "drag-to-top requires an upward drag whose pointer reaches the top strip")
-check('Date.now() - root.blockedAt > 1200 && !atEdge' in snap_qml,
-      "the post-snap latch re-arms only after a cooldown and a real move away")
+check('function dragTop(): void' not in snap_qml and
+      'function toggle(): void { root.open ? root.hide() : root.show() }' in snap_qml,
+      "the flyout opens only through its key-bound toggle")
 check('bottom_gap' not in snap_qml and 'pointerBottom' not in snap_qml and
       'snapEdge(' not in snap_qml,
       "off-screen bottom/pointer triggers are gone")
-check('function snap_top_line(mon)' in float_lua and
-      'return tonumber(my or 0) + reserved_top' in float_lua and
-      'snap_top_strip(line)' in float_lua and 'line + 56' in float_lua and
-      'reserved_top' in float_lua and 'mon.y' in float_lua,
-      "compositor drag tracking uses the same usable top edge and pointer strip")
-check('bottom_gap' not in float_lua and 'dbg_edge' not in float_lua,
-      "compositor no longer tracks the off-screen bottom edge")
+check('snap_top_line' not in float_lua and 'snap_top_strip' not in float_lua and
+      'dbg_edge' not in float_lua,
+      "compositor has no snap-edge tracking left")
 check('lastLayoutPoll' in snap_qml and 'root.refreshLayout()' in snap_qml,
-      "layout changes made outside the shell reach the drag check")
-check('function dragTop(): void' in snap_qml,
-      "drag-to-top can be driven over IPC for verification")
+      "layout changes made outside the shell reach the picker")
 check('function geom(c)' in snap_qml and 'c.at' in snap_qml and 'c.size' in snap_qml,
       "window geometry is read from hyprctl's at/size fields")
 check('function wsId(c)' in snap_qml and 'root.wsId(c) === ws' in snap_qml,

@@ -60,6 +60,7 @@ local function tag(window, name, on)
 end
 
 -- ---------------------------------------------------------------- workspaces
+local plugin_loaded
 function F.set_ws(ws, on)
   local id = tostring(ws)
   if on == nil then F.workspaces[id] = nil
@@ -137,7 +138,7 @@ function F.sweep()
 end
 
 -- ---------------------------------------------------------------- decorations
-local function plugin_loaded()
+function plugin_loaded()
   -- Never trust a successful load call alone: only configure bars once
   -- Hyprland itself reports the plugin as loaded, or its config keys do not
   -- exist yet and the whole config load fills the log with errors.
@@ -262,198 +263,6 @@ function F.setup_resize_hooks()
   if not ok then report("resize hooks", err) end
 end
 
--- ------------------------------------------------------------- drag to snap
--- The primary button is tracked through press/release binds so a floating
--- window dragged to the top of the usable area can arm the on-screen snap grid.
--- A top bar shifts that line below itself, so the window stays on screen. Mouse
--- binds are non-consuming, so normal dragging and in-app clicks keep working.
-local drag = { down = false, addr = nil, start_x = nil, start_y = nil,
-               armed = false, poll = nil, regtimer = nil }
-
-local function snap_ipc(cmd)
-  if not fn("dispatch") or type(hl.dsp) ~= "table" then return end
-  local ok, d = pcall(function() return hl.dsp.exec_cmd(cmd) end)
-  if not ok or not d then return end
-  pcall(hl.dispatch, d)
-end
-
-local function drag_stop_poll()
-  if drag.poll then
-    pcall(function() drag.poll:set_enabled(false) end)
-    drag.poll = nil
-  end
-end
-
-local function drag_reset()
-  drag.down = false
-  drag.addr = nil
-  drag.start_x = nil
-  drag.start_y = nil
-  drag.armed = false
-  drag_stop_poll()
-end
-
--- Hyprland exposes monitor fields under a few names depending on the version.
-local function num_field(t, names)
-  local kind = type(t)
-  if kind ~= "table" and kind ~= "userdata" then return nil end
-  for _, n in ipairs(names) do
-    if type(t[n]) == "number" then return t[n] end
-  end
-  return nil
-end
-
--- reserved is [left, top, right, bottom]. The first usable row is below any
--- bar or dock that owns the top edge; the decoration sits above the client, so
--- the pointer strip extends a little further down than that edge.
-local function snap_top_line(mon)
-  local ok, r = pcall(function() return mon.reserved end)
-  local reserved_top = num_field(r, { "top", 2 }) or 0
-  local oky, my = pcall(function() return mon.y end)
-  if not oky then return nil end
-  return tonumber(my or 0) + reserved_top
-end
-
-local function snap_top_strip(line)
-  return line + 56
-end
-
-local function drag_check()
-  if not drag.down or not drag.addr then return end
-  local ok, w = pcall(hl.get_window, "address:" .. drag.addr)
-  if not ok or not w then return end
-  local okf, floating = pcall(function() return w.floating end)
-  if not okf or floating ~= true then return end
-  local oka, at = pcall(function() return w.at end)
-  if not oka or type(at) ~= "table" then return end
-
-  local mon = nil
-  local okm, m = pcall(function() return w.monitor end)
-  if okm then mon = m end
-  if not mon and fn("get_monitor_at_cursor") then
-    local okc, c = pcall(hl.get_monitor_at_cursor)
-    if okc then mon = c end
-  end
-  if not mon then return end
-  local top_line = snap_top_line(mon)
-  if not top_line then return end
-  local strip = snap_top_strip(top_line)
-  local mon_y = tonumber(mon.y) or top_line
-
-  -- A click on the picker can reposition the window while the button is still
-  -- logically down. Require real upward pointer travel, not just proximity.
-  local px, py = nil, nil
-  if drag.start_x and drag.start_y and fn("get_cursor_pos") then
-    local okp, pos = pcall(hl.get_cursor_pos)
-    if okp and type(pos) == "table" then
-      px = tonumber(pos.x) or drag.start_x
-      py = tonumber(pos.y) or drag.start_y
-      local dx, dy = px - drag.start_x, py - drag.start_y
-      if dx * dx + dy * dy < 30 * 30 then return end
-      if drag.start_y - py <= 12 then return end
-    end
-  end
-  if not py then return end
-
-  -- The flyout appears only when the pointer itself touches the top strip.
-  -- With a bar and/or dock on top, top_line already sits below them; allowing
-  -- a small margin above it also covers a pointer resting on that panel.
-  if py < mon_y - 12 or py > strip then return end
-
-  local ay = tonumber(at.y or 0)
-  local top = ay - top_line
-  -- The dragged window must actually be at the top, not merely pointed at.
-  if top < -240 or top > 120 then return end
-
-  if not drag.armed then
-    drag.armed = true
-    snap_ipc("qs ipc call snap dragTop")
-  end
-  -- Re-arm only after the pointer and the window have both left the strip.
-  if py > strip + 64 or top > 160 then
-    drag.armed = false
-  end
-end
-
--- The window under the pointer, not the focused one: during a title-bar drag
--- focus can stay on a shell surface while a different window is being moved.
-local function window_at_cursor()
-  if not fn("get_cursor_pos") or not fn("get_windows") then return nil end
-  local okp, pos = pcall(hl.get_cursor_pos)
-  local okw, windows = pcall(hl.get_windows)
-  if not okp or not okw or type(pos) ~= "table" or type(windows) ~= "table" then return nil end
-  local found, best_area = nil, nil
-  for _, w in ipairs(windows) do
-    if w and w.address and w.mapped ~= false then
-      local oka, at = pcall(function() return w.at end)
-      local oks, sz = pcall(function() return w.size end)
-      if oka and oks and type(at) == "table" and type(sz) == "table" then
-        local x, y = tonumber(at.x or 0), tonumber(at.y or 0)
-        local sw, sh = tonumber(sz.x or 0), tonumber(sz.y or 0)
-        -- titles are decorations above the client geometry, so allow a margin
-        if pos.x >= x and pos.x <= x + sw and pos.y >= y - 48 and pos.y <= y + sh then
-          local area = sw * sh
-          if not best_area or area < best_area then
-            found, best_area = w, area
-          end
-        end
-      end
-    end
-  end
-  return found
-end
-
-local function drag_press()
-  local w = window_at_cursor()
-  drag.addr = (w and w.address) or nil
-  drag.start_x = nil
-  drag.start_y = nil
-  drag.armed = false
-  drag.down = true
-  if fn("get_cursor_pos") then
-    local okp, pos = pcall(hl.get_cursor_pos)
-    if okp and type(pos) == "table" then
-      drag.start_x = tonumber(pos.x)
-      drag.start_y = tonumber(pos.y)
-    end
-  end
-  if not drag.poll then
-    local okt, t = pcall(hl.timer, drag_check, { timeout = 30, type = "repeat" })
-    if okt then
-      drag.poll = t
-      pcall(function() t:set_enabled(true) end)
-    end
-  elseif drag.poll then
-    pcall(function() drag.poll:set_enabled(true) end)
-  end
-end
-
-local function drag_release()
-  -- Releasing ends the drag only. The picker stays open so the arrangement and
-  -- zone can be chosen with normal clicks.
-  drag_reset()
-end
-
-local function register_drag_binds()
-  drag.regtimer = nil
-  if not fn("bind") or not fn("get_windows") then return end
-  pcall(hl.bind, "mouse:272", drag_press, { non_consuming = true, ignore_mods = true })
-  pcall(hl.bind, "mouse:272", drag_release,
-        { release = true, non_consuming = true, ignore_mods = true })
-end
-
-function F.setup_drag_snap()
-  if not fn("bind") or not fn("timer") or not fn("get_windows") then return end
-  -- keys.lua clears plain mouse:272 while the config is being assembled. Defer
-  -- our binds until after every load callback so they are the last registration.
-  if drag.regtimer then return end
-  local ok, t = pcall(hl.timer, register_drag_binds, { timeout = 10, type = "oneshot" })
-  if ok then drag.regtimer = t end
-end
-
--- Register on module load too: the reloaded hook does not run on the first pass.
-F.setup_drag_snap()
-
 -- ---------------------------------------------------------------- minimize
 local function window_by_address(addr)
   if not addr or not fn("get_windows") then return nil end
@@ -574,6 +383,16 @@ local function on_window_active(w)
   finish()
 end
 
+-- Hyprland exposes monitor fields under a few names depending on the version.
+local function num_field(t, names)
+  local kind = type(t)
+  if kind ~= "table" and kind ~= "userdata" then return nil end
+  for _, n in ipairs(names) do
+    if type(t[n]) == "number" then return t[n] end
+  end
+  return nil
+end
+
 -- ------------------------------------------------------------- new windows
 -- A window opened on a Floating workspace starts at half the monitor's logical
 -- resolution. Reserved edges and the decorated titlebar are removed from that
@@ -688,7 +507,6 @@ local function loaded()
   end
   F.load_decorations()
   F.setup_resize_hooks()
-  F.setup_drag_snap()
   F.apply()
 end
 
