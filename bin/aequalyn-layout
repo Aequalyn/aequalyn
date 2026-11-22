@@ -58,7 +58,7 @@ layout_of() { # layout_of <ws>
 
 cycle_list() {
     local c
-    c=$(setting '.layouts.cycle | if type == "array" and length > 1 then .[] else empty end')
+    c=$(setting '.layouts.cycle | if type == "array" and length > 0 then .[] else empty end')
     if [[ -n "$c" ]]; then printf '%s\n' "$c"; else jq -r '.[].id' "$CATALOGUE"; fi
 }
 
@@ -170,7 +170,7 @@ case "$cmd" in
         if [[ $# -eq 0 ]]; then cycle_list; exit 0; fi
         ids=()
         for a in "$@"; do id=$(resolve "$a"); [[ -n "$id" ]] || die "unknown layout: $a"; ids+=("$id"); done
-        [[ ${#ids[@]} -ge 2 ]] || die "the cycle needs at least two layouts"
+        [[ ${#ids[@]} -ge 1 ]] || die "the cycle needs at least one layout"
         aequalyn-settings set .layouts.cycle "$(printf '%s\n' "${ids[@]}" | jq -R . | jq -s -c .)" >/dev/null ;;
     option)
         [[ $# -eq 2 ]] || die "usage: option pane|middle|gap|step|notify|outline|others|flash <value>"
