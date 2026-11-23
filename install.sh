@@ -131,6 +131,7 @@ fi
 # generated from the wallpaper (the clone ships a default wallpaper-theme.json).
 _qs="$TARGET/.config/quickshell"
 _qs_new="$TARGET/.config/.quickshell.new.$$"
+_qs_swap_marker="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/aequalyn/quickshell-config-swap"
 rm -rf "$_qs_new"
 mkdir -p "$_qs_new"
 tar -C "$SHELL_SRC" --exclude=./.git -cf - . | tar -C "$_qs_new" -xf -
@@ -140,6 +141,10 @@ for _keep in wallpaper.conf theme.conf theme-switcher/wallpaper-theme.json; do
         cp -f "$_qs/$_keep" "$_qs_new/$_keep"
     fi
 done
+# Mark the swap so the running shell treats load failures as transient while
+# the config tree is being replaced. PluginManager ignores a stale marker.
+mkdir -p "$(dirname "$_qs_swap_marker")"
+printf '%s\n' "$(date +%s)" > "$_qs_swap_marker"
 rm -rf "$_qs"
 mv "$_qs_new" "$_qs"
 # Clipboard capture helper is invoked by wl-paste; keep it executable here and

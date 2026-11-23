@@ -199,6 +199,9 @@ main() {
 
     echo "==> restarting the shell"
     step="restarting the shell"
+    _qs_swap_marker="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/aequalyn/quickshell-config-swap"
+    mkdir -p "$(dirname "$_qs_swap_marker")"
+    printf '%s\n' "$(date +%s)" > "$_qs_swap_marker"
     if command -v aequalyn-watchdog >/dev/null 2>&1 && aequalyn-watchdog status >/dev/null 2>&1; then
         # The supervisor owns the shell and the sandboxed plugin processes:
         # tell it, so the restart is planned (not counted as crashes), and the
