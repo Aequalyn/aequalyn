@@ -274,11 +274,18 @@ chmod 755 "$TARGET/.local/bin/"* 2>/dev/null || true
 info "bin -> $TARGET/.local/bin"
 
 # The watchdog command lives in the shell tree, not in bin/: link it from the
-# installed shell, so every shell update brings the command with it. Skel is
-# skipped (an absolute symlink would still point into /etc/skel once a new
-# user's home is copied from it), and so are shells too old to have it.
-if [[ $SKEL -eq 0 && -x "$TARGET/.config/quickshell/tools/watchdog/aequalyn-watchdog" ]]; then
-    ln -sfn "$TARGET/.config/quickshell/tools/watchdog/aequalyn-watchdog" "$TARGET/.local/bin/aequalyn-watchdog"
+# installed shell, so every shell update brings the command with it. The link is
+# RELATIVE on purpose: the installer calls us with --target /mnt/home/<user>,
+# where an absolute link would point into /mnt after the first reboot, and
+# --skel would leave one pointing into /etc/skel. ../../ from ~/.local/bin is
+# the user's home in every case. Restore the mode here as well, since the ISO's
+# mkarchiso step strips executable bits from the shell tree.
+WD="$TARGET/.config/quickshell/tools/watchdog/aequalyn-watchdog"
+if [[ -f "$WD" ]]; then
+    chmod 755 "$WD" 2>/dev/null || true
+    mkdir -p "$TARGET/.local/bin"
+    ln -sfn ../../.config/quickshell/tools/watchdog/aequalyn-watchdog "$TARGET/.local/bin/aequalyn-watchdog"
+    [[ -n "$OWNER" ]] && chown -h "$OWNER" "$TARGET/.local/bin/aequalyn-watchdog" 2>/dev/null || true
     info "watchdog -> $TARGET/.local/bin/aequalyn-watchdog"
 fi
 
