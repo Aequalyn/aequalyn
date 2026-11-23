@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 20261123-1.sh -- migration for existing installs: finish Aequalyn FM setup.
+# 20261123-1.sh -- migration for existing installs: finish FM and lock setup.
 #
 # The ISO's mkarchiso step strips executable bits from the shell tree in
 # /opt/aequalyn, and install.sh used to copy those stripped modes into the
@@ -19,7 +19,9 @@
 #   2. creates the FM's desktop entry if the session start skipped it, without
 #      changing the user's choice of default file manager or portal;
 #   3. adds aequalyn.fm to the settings.json seed if it is missing there;
-#   4. adds aequalyn.fm to every existing docks.json, so the pin survives.
+#   4. adds aequalyn.fm to every existing docks.json, so the pin survives;
+#   5. installs the root-owned PAM stacks the Quickshell lock plugin needs;
+#   6. fixes /usr/share/aequalyn's mode and a stale "undefined" lock style.
 #
 # A running shell does not need a restart: the dock watches docks.json, and
 # the .desktop entry is picked up on the next desktop-entry rescan.
@@ -38,6 +40,11 @@ for d in /var/lib/pacman /var/lib/pacman/local /var/lib/pacman/sync \
          /var/cache/pacman /var/cache/pacman/pkg; do
     [[ -d $d ]] && chmod 755 "$d" 2>/dev/null || true
 done
+# The shell watches /usr/share/aequalyn/lockscreens.enabled; a mode-700
+# directory makes that FileView fail with "Permission denied".
+chmod 755 /usr/share/aequalyn 2>/dev/null || true
+[[ -e /usr/share/aequalyn/lockscreens.enabled ]] \
+    && chmod 644 /usr/share/aequalyn/lockscreens.enabled 2>/dev/null || true
 
 info() { printf '\033[0;34m[20261123-1]\033[0m %s\n' "$*"; }
 ok()   { printf '\033[0;32m[20261123-1]\033[0m %s\n' "$*"; }
@@ -64,6 +71,21 @@ for home in "${homes[@]}"; do
     for d in "$qs"/plugins/*/bin "$qs"/plugins/*/daemon; do
         [[ -d $d ]] && chmod 755 "$d"/* 2>/dev/null || true
     done
+
+    # The lock plugin refuses to lock without /etc/pam.d/aequalyn-lock-password.
+    # Fresh ISO installs stamp migration 20261122-4 as done and never ran it, so
+    # install the stacks here. SUDO_USER makes the helper read this user's
+    # templates instead of root's.
+    apply_lock=$home/.local/bin/aequalyn-apply-lock
+    [[ -x $apply_lock ]] || apply_lock=/usr/local/bin/aequalyn-apply-lock
+    if [[ -x $apply_lock ]]; then
+        user=$(stat -c '%U' "$home" 2>/dev/null || true)
+        if [[ -n $user && $user != root ]] && SUDO_USER="$user" "$apply_lock" >/dev/null 2>&1; then
+            info "installed Aequalyn lock PAM stacks for $user"
+        else
+            warn "could not install Aequalyn lock PAM stacks for $home"
+        fi
+    fi
 
     bin=$fm_dir/bin/aequalyn-fm
     [[ -f $bin ]] || continue
@@ -98,9 +120,19 @@ if not isinstance(dock, dict):
 pinned = dock.get("pinned")
 if not isinstance(pinned, list):
     pinned = []
+changed = False
 if "aequalyn.fm" not in [str(x).removesuffix(".desktop") for x in pinned]:
     pinned.insert(0, "aequalyn.fm")
     dock["pinned"] = pinned
+    changed = True
+# Some look/theme writes left the literal string "undefined" here. The shell
+# accepts it (it matches [a-z0-9-]+) but LockView falls back to classic anyway;
+# store the real default so the setting says what is actually shown.
+power = d.get("power")
+if isinstance(power, dict) and str(power.get("lockStyle", "")) in ("undefined", ""):
+    power["lockStyle"] = "classic"
+    changed = True
+if changed:
     open(p, "w").write(json.dumps(d, indent=2) + "\n")
 PY
         chown "$owner" "$settings" 2>/dev/null || true
