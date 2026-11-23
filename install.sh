@@ -147,7 +147,6 @@ resolve_repo() {
 [[ -d "$ROOT/config" ]] || { echo "Aequalyn core tree not found at $ROOT" >&2; exit 1; }
 
 SHELL_SRC=$(resolve_repo aequalyn-shell shell "${AEQUALYN_SHELL_DIR:-}") \
-
     || { echo "aequalyn-shell not found (set AEQUALYN_SHELL_DIR)" >&2; exit 1; }
 
 THEMES_SRC=$(resolve_repo aequalyn-themes themes "${AEQUALYN_THEMES_DIR:-}" || true)
@@ -173,11 +172,8 @@ if [[ $SKEL -eq 0 && -f "$TARGET/.config/aequalyn/settings.json" ]]; then
     _items=()
 
     for p in .config/aequalyn .config/mimeapps.list .config/hypr .config/kitty .config/foot \
-
              .config/fuzzel .config/qt6ct .config/gtk-3.0 .config/gtk-4.0 \
-
              .config/quickshell/wallpaper.conf .config/quickshell/theme.conf \
-
              .config/quickshell/theme-switcher/wallpaper-theme.json; do
 
         [[ -e "$TARGET/$p" ]] && _items+=("$p")
@@ -303,14 +299,14 @@ mv "$_qs_new" "$_qs"
 # cloned here by aequalyn-update or a live ISO whose source tree was stripped.
 
 chmod 755 "$TARGET/.config/quickshell/plugins/clipboard/capture.sh" \
-
           "$TARGET/.config/quickshell/tools/watchdog/aequalyn-watchdog" 2>/dev/null || true
 
 for d in "$TARGET"/.config/quickshell/plugins/*/bin "$TARGET"/.config/quickshell/plugins/*/daemon; do
 
     [[ -d $d ]] && chmod 755 "$d"/* 2>/dev/null || true
 
-doneinfo "shell -> $TARGET/.config/quickshell"
+done
+info "shell -> $TARGET/.config/quickshell"
 
 
 
@@ -801,7 +797,6 @@ if [[ "$SEED_WEBAPPS" -eq 1 && -x "$TARGET/.local/bin/aequalyn-webapp" ]]; then
     info "seeding web apps (browser: ${WEBAPP_BROWSER:-unchanged}) ..."
 
     HOME="$TARGET" AEQUALYN_ASSETS="$TARGET/.local/share/aequalyn/assets" \
-
         "$TARGET/.local/bin/aequalyn-webapp" seed ${WEBAPP_BROWSER:+--browser "$WEBAPP_BROWSER"} >/dev/null 2>&1 || true
 
 fi
