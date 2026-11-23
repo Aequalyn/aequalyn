@@ -1,0 +1,273 @@
+#!/usr/bin/env bash
+# aequalyn-browser-theme -- let Chromium-based browsers use the Aequalyn bar colour.
+#
+# Usage:
+#   aequalyn-browser-theme sync [--color '#rrggbb']   publish if the setting is on
+#   aequalyn-browser-theme on [--color '#rrggbb']     publish now
+#   aequalyn-browser-theme off                        remove the policy
+#
+# Chromium only reads its frame colour from a system-wide managed policy, so the
+# bar's base colour (bgBase) is published as BrowserThemeColor there. No
+# BrowserColorScheme key: it is not a valid Chromium policy (browsers report it
+# as an error) and the colour works on its own.
+#
+# AUTHORISATION: one gate, the same one every plugin uses. The user half
+# stages the colour and calls aequalyn-watchdog exec-root (an approval window
+# naming the command, the password going to sudo on a pipe); the root half is
+# only ever started by the watchdog (gate-publish / gate-clear), re-finds the
+# staged colour through SUDO_USER's home, validates it, and writes the
+# policies itself. No pkexec, no sudo -A, no askpass, no sudoers rules -- and a
+# repeated sync with the same colour still asks for nothing (nothing changes).
+
+set -uo pipefail
+
+SETTINGS="${XDG_CONFIG_HOME:-$HOME/.config}/aequalyn/settings.json"
+SELF="$(readlink -f "$0")"
+STAGE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/aequalyn/gate"
+STAGE_FILE="$STAGE_DIR/browser-theme.json"
+
+log() { printf '\033[0;34m[aequalyn-browser-theme]\033[0m %s\n' "$*" >&2; }
+
+# ---- root half: the only part that touches /etc ----------------------------
+if [[ ${1:-} == "--root" ]]; then
+    shift
+    action="${1:-}"; shift || true
+    case "$action" in
+        write)
+            color="${1:-}"; shift || true
+            [[ $color =~ ^#[0-9a-fA-F]{6}$ ]] || exit 1
+            payload=$(printf '{"BrowserThemeColor": "%s"}\n' "$color")
+            for dir in "$@"; do
+                [[ -n $dir ]] || continue
+                mkdir -p "$dir" 2>/dev/null || continue
+                # The browser runs as the desktop user. mkdir -p inherits root's
+                # umask, which can leave /etc/opt, /etc/chromium and friends at
+                # 0700: the file is 0644 but nobody can traverse to it, and the
+                # user half cannot see it either (so it asks again every time).
+                # Make every /etc component on the way to the policy dir
+                # traversable/readable before writing the file.
+                component="$dir"
+                while [[ $component == /etc || $component == /etc/* ]]; do
+                    chmod 755 "$component" 2>/dev/null || true
+                    [[ $component == /etc ]] && break
+                    component="${component%/*}"
+                done
+                printf '%s' "$payload" > "$dir/color.json" 2>/dev/null || continue
+                chown root:root "$dir/color.json" 2>/dev/null || true
+                chmod 644 "$dir/color.json" 2>/dev/null || true
+            done
+            ;;
+        remove)
+            for dir in "$@"; do
+                [[ -n $dir ]] || continue
+                rm -f "$dir/color.json" 2>/dev/null || true
+            done
+            ;;
+        *) exit 1 ;;
+    esac
+    exit 0
+fi
+
+# ---- the gate halves, run as root by the watchdog's exec-root ---------------
+# The watchdog starts these with a fixed argv; everything they need from the
+# user's side was staged in a file they re-find through SUDO_USER (sudo resets
+# HOME, but always keeps SUDO_USER), and they trust nothing in it beyond
+# strict validation: the colour must be a hex pair, the directories are
+# recomputed here, as root, never taken from the file.
+gate_root_home() {
+    local user="${SUDO_USER:-}" home=""
+    [[ -n $user ]] || { log "no SUDO_USER: not started by the gate"; exit 1; }
+    home=$(getent passwd "$user" | cut -d: -f6)
+    [[ -n $home ]] || { log "no home for $user"; exit 1; }
+    printf '%s' "$home"
+}
+
+if [[ ${1:-} == "gate-publish" || ${1:-} == "gate-clear" ]]; then
+    [[ ${EUID} -eq 0 ]] || { log "gate halves need root"; exit 1; }
+    home=$(gate_root_home)
+    stage="$home/.local/state/aequalyn/gate/browser-theme.json"
+    color=""
+    if [[ ${1:-} == "gate-publish" ]]; then
+        color=$(jq -r '.color // empty' "$stage" 2>/dev/null || true)
+        [[ $color =~ ^#[0-9a-fA-F]{6}$ ]] || { log "staged colour is missing or invalid"; exit 1; }
+    fi
+    mapfile -t dirs < <(
+        find /etc -type d -path '*/policies/managed' -print 2>/dev/null | sort -u
+        for pair in \
+            "chromium:/etc/chromium/policies/managed" \
+            "chromium-browser:/etc/chromium/policies/managed" \
+            "google-chrome:/etc/opt/chrome/policies/managed" \
+            "google-chrome-stable:/etc/opt/chrome/policies/managed" \
+            "google-chrome-beta:/etc/opt/chrome/policies/managed" \
+            "microsoft-edge:/etc/opt/edge/policies/managed" \
+            "microsoft-edge-stable:/etc/opt/edge/policies/managed" \
+            "microsoft-edge-dev:/etc/opt/edge/policies/managed" \
+            "brave:/etc/brave/policies/managed" \
+            "brave-browser:/etc/brave/policies/managed" \
+            "vivaldi:/etc/vivaldi/policies/managed" \
+            "vivaldi-stable:/etc/vivaldi/policies/managed" \
+            "opera:/etc/opt/opera/policies/managed" \
+            "yandex-browser:/etc/yandex-browser/policies/managed"; do
+            cmd=${pair%%:*}; dir=${pair#*:}
+            command -v "$cmd" >/dev/null 2>&1 && printf '%s\n' "$dir"
+        done | sort -u
+    )
+    if [[ ${1:-} == "gate-publish" ]]; then
+        "$SELF" --root write "$color" "${dirs[@]}"
+        log "published $color to ${#dirs[@]} browser polic(ies)"
+    else
+        "$SELF" --root remove "${dirs[@]}"
+        log "removed the colour policy from ${#dirs[@]} browser polic(ies)"
+    fi
+    exit 0
+fi
+
+# ---- user half --------------------------------------------------------------
+action="${1:-sync}"; shift || true
+color=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --color) color="${2:-}"; shift 2 ;;
+        --prompt) shift ;;   # kept for compatibility; always interactive now
+        *) shift ;;
+    esac
+done
+
+current_color() {
+    local tc id="" c=""
+    tc=$(cat "$HOME/.config/quickshell/theme.conf" 2>/dev/null || true)
+    # theme.conf is authoritative: in wallpaper mode `aequalyn-themes current`
+    # stays at the last folder theme, which would publish a stale colour.
+    if [[ $tc == theme:* ]]; then
+        id=${tc#theme:}
+    elif [[ $tc != wallpaper ]] && command -v aequalyn-themes >/dev/null 2>&1; then
+        id=$(aequalyn-themes current 2>/dev/null || true)
+    fi
+    if [[ -n $id ]] && command -v aequalyn-themes >/dev/null 2>&1; then
+        c=$(aequalyn-themes list --json 2>/dev/null \
+            | jq -r --arg id "$id" '(.[]? | select(.id == $id) | .palette.bgBase // empty)' \
+            2>/dev/null | head -1 || true)
+    fi
+    if [[ -z $c ]]; then
+        c=$(jq -r '.bgBase // empty' \
+            "$HOME/.config/quickshell/theme-switcher/wallpaper-theme.json" 2>/dev/null || true)
+    fi
+    if [[ -z $c ]]; then
+        c=$(jq -r '.background // .bgBase // empty' "$HOME/.cache/aequalyn/colors.json" 2>/dev/null || true)
+    fi
+    [[ $c =~ ^#?[0-9a-fA-F]{6}$ ]] || c="#121515"
+    [[ $c == \#* ]] || c="#$c"
+    printf '%s' "${c,,}"
+}
+
+policy_dirs() {
+    local dirs=() dir
+    # Every Chromium-style managed-policy directory that exists on this machine
+    # gets color.json -- Chrome, Chromium, Edge, Brave, Vivaldi, Opera, etc.
+    while IFS= read -r dir; do
+        [[ -n $dir ]] && dirs+=("$dir")
+    done < <(find /etc -type d -path '*/policies/managed' -print 2>/dev/null | sort -u)
+
+    # Also create the dirs for supported browsers that are installed but do not
+    # have a policy dir yet, so they pick up the colour on their first launch.
+    local pair cmd
+    for pair in \
+        "chromium:/etc/chromium/policies/managed" \
+        "chromium-browser:/etc/chromium/policies/managed" \
+        "google-chrome:/etc/opt/chrome/policies/managed" \
+        "google-chrome-stable:/etc/opt/chrome/policies/managed" \
+        "google-chrome-beta:/etc/opt/chrome/policies/managed" \
+        "microsoft-edge:/etc/opt/edge/policies/managed" \
+        "microsoft-edge-stable:/etc/opt/edge/policies/managed" \
+        "microsoft-edge-dev:/etc/opt/edge/policies/managed" \
+        "brave:/etc/brave/policies/managed" \
+        "brave-browser:/etc/brave/policies/managed" \
+        "vivaldi:/etc/vivaldi/policies/managed" \
+        "vivaldi-stable:/etc/vivaldi/policies/managed" \
+        "opera:/etc/opt/opera/policies/managed" \
+        "yandex-browser:/etc/yandex-browser/policies/managed"; do
+        cmd=${pair%%:*}; dir=${pair#*:}
+        command -v "$cmd" >/dev/null 2>&1 || continue
+        [[ " ${dirs[*]:-} " == *" $dir "* ]] || dirs+=("$dir")
+    done
+    printf '%s\n' "${dirs[@]}"
+}
+
+# Ask through the gate: stage the colour, then aequalyn-watchdog exec-root
+# (an approval window names the command; the password goes to sudo on a
+# pipe). A denial or a timeout leaves everything as it was.
+stage_gate() {
+    mkdir -p "$STAGE_DIR"
+    printf '{"color": "%s"}\n' "$color" > "$STAGE_FILE"
+}
+gate_run() { # <action>
+    local reply rc=0
+    reply=$(aequalyn-watchdog exec-root --as settings "$1" 2>&1) || rc=$?
+    if [[ $rc -ne 0 ]]; then
+        if printf '%s' "$reply" | grep -q "not a supervised process"; then
+            log "the gate only answers the desktop; from a terminal run it yourself:"
+            log "    sudo $SELF --root write '$color' \$(find /etc -type d -path '*/policies/managed')"
+            return 1
+        fi
+        log "the gate answered: $(printf '%s' "$reply" | tail -n +2 | tr -d '\n ' | cut -c1-160)"
+        return $rc
+    fi
+    return 0
+}
+write_policy() { stage_gate; gate_run browser-theme-publish || return 1; }
+remove_policy() { gate_run browser-theme-clear || return 1; }
+
+# Skip the prompt when every policy file already holds the requested colour.
+policy_has() {
+    local want=$1 dir n=0
+    for dir in "${dirs[@]}"; do
+        [[ -f "$dir/color.json" ]] || return 1
+        grep -q "\"BrowserThemeColor\": \"$want\"" "$dir/color.json" 2>/dev/null || return 1
+        n=$((n + 1))
+    done
+    [[ $n -gt 0 ]]
+}
+policy_any() {
+    local dir
+    for dir in "${dirs[@]}"; do [[ -f "$dir/color.json" ]] && return 0; done
+    return 1
+}
+
+refresh_browsers() {
+    local cmd
+    for cmd in google-chrome google-chrome-stable google-chrome-beta \
+               chromium chromium-browser microsoft-edge microsoft-edge-stable \
+               microsoft-edge-dev brave brave-browser vivaldi vivaldi-stable \
+               opera yandex-browser; do
+        command -v "$cmd" >/dev/null 2>&1 || continue
+        "$cmd" --refresh-platform-policy --no-startup-window >/dev/null 2>&1 &
+    done
+    true
+}
+
+mapfile -t dirs < <(policy_dirs)
+
+case "$action" in
+    sync)
+        enabled=$(jq -r '.appearance.themeBrowser // false' "$SETTINGS" 2>/dev/null || echo false)
+        [[ $enabled == true ]] || exit 0
+        [[ -n $color ]] || color=$(current_color)
+        policy_has "$color" && exit 0
+        write_policy || true
+        ;;
+    on)
+        [[ -n $color ]] || color=$(current_color)
+        policy_has "$color" && exit 0
+        write_policy || true
+        ;;
+    off)
+        policy_any || exit 0
+        remove_policy || true
+        ;;
+    *)
+        log "usage: $0 {sync|on|off} [--color '#rrggbb']"
+        exit 2
+        ;;
+esac
+
+refresh_browsers
