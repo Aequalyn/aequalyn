@@ -1,0 +1,33 @@
+#!/bin/bash
+# aequalyn-sleep-lock-monitor -- hold a logind sleep-delay inhibitor and lock
+# the session before suspend. The inhibit window is what makes the lock
+# synchronous: logind waits here until the compositor reports the lock secure.
+set -u
+export PATH="$HOME/.local/bin:$PATH"
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/aequalyn"
+mkdir -p "$STATE_DIR" 2>/dev/null || true
+log() { printf '[aequalyn-sleep-lock] %s\n' "$*" >>"$STATE_DIR/session.log" 2>/dev/null || true; }
+
+lock_before_sleep() {
+    log "PrepareForSleep: locking"
+    aequalyn-lock lockForSleep >/dev/null 2>&1 || log "lock command failed"
+    if aequalyn-lock wait-secure 12 >/dev/null 2>&1; then
+        log "lock secure"
+    else
+        log "lock did not become secure in 12s"
+    fi
+}
+
+if [[ ${1:-} == "--monitor" ]]; then
+    dbus-monitor --system \
+        'type=signal,interface=org.freedesktop.login1.Manager,member=PrepareForSleep' \
+        2>/dev/null | while IFS= read -r line; do
+            if [[ $line == *"boolean true"* ]]; then lock_before_sleep; fi
+        done
+    exit 0
+fi
+
+exec systemd-inhibit \
+    --what=sleep --mode=delay --who=Aequalyn --why="Lock screen before suspend" \
+    "$0" --monitor

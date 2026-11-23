@@ -1,0 +1,12 @@
+[Unit]
+Description=Lock the Aequalyn session before suspend
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/aequalyn-sleep-lock-monitor
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target
