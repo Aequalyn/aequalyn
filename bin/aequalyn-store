@@ -638,6 +638,8 @@ def do_remove(kind, ident):
         return
     if not ID_RE.match(ident):
         raise Fail(f"not an id: {ident}")
+    if kind == "app":
+        raise Fail("an app is pacman's: remove its package")
     dest = ROOTS[kind] / ident
     d = db_load()
     if f"{kind}:{ident}" not in d and kind != "plugin":
@@ -668,6 +670,8 @@ def do_remove(kind, ident):
 def do_update(kind, ident):
     if kind == "appimage":
         raise Fail("an appimage is one file: import it again to replace it")
+    if kind == "app":
+        raise Fail("an app is built again from its own page")
     rec = db_load().get(f"{kind}:{ident}")
     if not rec:
         raise Fail(f"'{ident}' was not installed by the Store")
@@ -687,12 +691,24 @@ def do_update(kind, ident):
     do_install(kind, rec["source"], None, enable=False, quiet_update=True)
 
 
+def app_here(rec):
+    """whether pacman still has what an app was built into"""
+    names = [n for n in (rec.get("packages") or []) if PKG_NAME_RE.match(str(n)) and not str(n).startswith("-")]
+    return bool(names) and run(["pacman", "-Q", "--"] + names, stdin=subprocess.DEVNULL).returncode == 0
+
+
 def do_list(kind, as_json):
     d = db_load()
     items = [v for k, v in sorted(d.items()) if not kind or v.get("kind") == kind]
     for it in items:
         # an appimage lives under its own file name; every other kind under its id
-        it["present"] = (ROOTS[it["kind"]] / it.get("file", it["id"])).exists()
+        if it["kind"] == "app":
+            # pacman's, once it is built
+            it["present"] = app_here(it)
+        elif it["kind"] in ROOTS:
+            it["present"] = (ROOTS[it["kind"]] / it.get("file", it["id"])).exists()
+        else:
+            it["present"] = False            # a kind a newer Store knows: never a reason to list nothing
     if kind == "plugin" or not kind:
         root = ROOTS["plugin"]
         for p in sorted(root.glob("*/plugin.json")) if root.exists() else []:
@@ -756,12 +772,28 @@ def do_apply_look(ident, piece):
 
 
 # ---- the Market ----------------------------------------------------------------------------
+def market_now():
+    """the catalog's address at the newest commit: the one by branch is kept for minutes by
+    GitHub's cache, and its checksum apart from it, so the two can be of different ages"""
+    m = re.match(r"^https://raw\.githubusercontent\.com/([\w.-]+/[\w.-]+)/main/(.+)$", MARKET_URL)
+    if not m:
+        return MARKET_URL
+    try:
+        r = subprocess.run(["git", "ls-remote", f"https://github.com/{m.group(1)}", "refs/heads/main"], capture_output=True,
+                           text=True, timeout=15, env=dict(os.environ, GIT_TERMINAL_PROMPT="0"))
+        sha = r.stdout.split()[0] if r.returncode == 0 and r.stdout else ""
+    except (OSError, subprocess.TimeoutExpired):
+        sha = ""
+    return f"https://raw.githubusercontent.com/{m.group(1)}/{sha}/{m.group(2)}" if re.fullmatch(r"[0-9a-f]{40}", sha) else MARKET_URL
+
+
 def do_refresh():
+    url_now = market_now()
     step(f"Fetching the catalog from {MARKET_URL}")
     STATE.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
         db, sha = Path(tmp) / "market.json", Path(tmp) / "market.json.sha256"
-        for url, out in ((MARKET_URL, db), (MARKET_URL + ".sha256", sha)):
+        for url, out in ((url_now, db), (url_now + ".sha256", sha)):
             r = run(["curl", "-fsSL", "--proto", "=https", "--max-filesize", str(20 << 20), "-o", str(out), url])
             if r.returncode:
                 raise Fail(f"could not fetch {url}")
@@ -797,7 +829,7 @@ def market_items():
         else:
             rec = d.get(f"{kind}:{it.get('id')}")
             # an app is pacman's once it is built: removed there, it is gone here too
-            if rec and kind == "app" and run(["pacman", "-Q"] + list(rec.get("packages") or ["-"])).returncode:
+            if rec and kind == "app" and not app_here(rec):
                 rec = None
             # the same name from another repo is another item
             if rec and rec.get("source") and rec.get("source") != it.get("repo"):
