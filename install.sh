@@ -213,7 +213,22 @@ for dir in hypr kitty foot fuzzel qt6ct gtk-3.0 gtk-4.0 btop matugen fastfetch a
                 aequalyn-colors.conf|aequalyn-colors.ini|aequalyn.conf|aequalyn.theme|gtk.css|colors.lua|look.lua|workspace-layouts.lua|wallpaper-theme.json|hyprlock.conf)
                     if [[ $FORCE -eq 1 || ! -e "$dst/$base" ]]; then cp -r "$f" "$dst/$base"; fi
                     ;;
-                *) cp -r "$f" "$dst/" ;;
+                *)
+                    # the generated colours one level down (btop/themes, qt6ct/colors)
+                    # are kept as well: copied aside, then put back over the shipped ones
+                    _gen=""
+                    for _c in aequalyn.conf aequalyn.theme; do
+                        [[ $FORCE -eq 0 && -d "$f" && -f "$dst/$base/$_c" ]] || continue
+                        _gen=$(mktemp)
+                        cp -p "$dst/$base/$_c" "$_gen"
+                        break
+                    done
+                    cp -r "$f" "$dst/"
+                    if [[ -n "$_gen" ]]; then
+                        cp -p "$_gen" "$dst/$base/$_c"
+                        rm -f "$_gen"
+                    fi
+                    ;;
             esac
         done
     else
@@ -277,6 +292,29 @@ for _f in "$ROOT/bin/"*; do
 done
 chmod 755 "$TARGET/.local/bin/"* 2>/dev/null || true
 info "bin -> $TARGET/.local/bin"
+
+# Aequalyn's own fonts, in the user's font folder
+if [[ -d "$ROOT/assets/fonts" ]]; then
+    mkdir -p "$TARGET/.local/share/fonts/aequalyn"
+    _fonts=0
+    for _f in "$ROOT/assets/fonts/"*.ttf; do
+        [[ -f "$_f" ]] || continue
+        _n="$TARGET/.local/share/fonts/aequalyn/$(basename "$_f")"
+        cmp -s "$_f" "$_n" && continue
+        cp "$_f" "$_n.new"
+        mv -f "$_n.new" "$_n"
+        _fonts=1
+    done
+    if [[ $_fonts -eq 1 && $SKEL -eq 0 ]] && command -v fc-cache >/dev/null 2>&1; then
+        fc-cache -f "$TARGET/.local/share/fonts/aequalyn" >/dev/null 2>&1 || true
+        # in use already: terminals and apps take the new ones now
+        if [[ "$TARGET" == "$HOME" && $EUID -ne 0 ]] \
+           && grep -qE '"(uiFont|monoFont)"[[:space:]]*:[[:space:]]*"Aequalyn' "$TARGET/.config/aequalyn/settings.json" 2>/dev/null; then
+            "$TARGET/.local/bin/aequalyn-apply-fonts" >/dev/null 2>&1 || true
+        fi
+    fi
+    info "fonts -> $TARGET/.local/share/fonts/aequalyn"
+fi
 
 # The watchdog command lives in the shell tree, not in bin/: link it from the
 # installed shell, so every shell update brings the command with it. The link is

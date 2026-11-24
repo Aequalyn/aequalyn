@@ -173,6 +173,16 @@ local function accent(alpha)
   return "rgba(" .. colour .. (alpha or "ff") .. ")"
 end
 
+-- The titlebar's text in the desktop's UI font (settings.json); aequalyn-apply-fonts
+-- reloads Hyprland after a change while the titlebar is loaded.
+local function ui_font()
+  local file = io.open((os.getenv("HOME") or "") .. "/.config/aequalyn/settings.json", "r")
+  if not file then return "JetBrainsMono Nerd Font" end
+  local text = file:read("*a") or ""
+  file:close()
+  return text:match('"uiFont"%s*:%s*"([^"\\]+)"') or "JetBrainsMono Nerd Font"
+end
+
 local function configure_decorations()
   if not F.decorations.loaded or not fn("config") then return end
   local ok, err = pcall(hl.config, {
@@ -182,7 +192,7 @@ local function configure_decorations()
         bar_color = accent("e6"),
         col = { text = "rgba(f2f2f2ff)" },
         bar_text_size = 11,
-        bar_text_font = "JetBrainsMono Nerd Font",
+        bar_text_font = ui_font(),
         bar_text_align = "left",
         bar_buttons_alignment = "right",
         bar_padding = 10,

@@ -36,6 +36,7 @@ hl.bind(M .. " + G",       hl.dsp.exec_cmd("qs ipc call snap toggle"))       -- 
 hl.bind(M .. " + ALT + A", hl.dsp.exec_cmd("qs ipc call defaults toggle")) -- Default apps launcher
 hl.bind(M .. " + ALT + S",       hl.dsp.exec_cmd("qs ipc call store toggle"))   -- Store: plugins, themes, cursors, looks
 hl.bind(M .. " + COMMA",   hl.dsp.exec_cmd("qs ipc call aequalyn settings"))
+hl.bind(M .. " + CTRL + PERIOD",  hl.dsp.exec_cmd("qs ipc call fonts toggle"))        -- Fonts
 -- Window layouts: Super + L steps through them, the control center shows them all
 hl.bind(M .. " + L",         hl.dsp.exec_cmd("aequalyn-layout next"))
 hl.bind(M .. " + SHIFT + L", hl.dsp.exec_cmd("aequalyn-layout prev"))
