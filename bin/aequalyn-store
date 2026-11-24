@@ -560,7 +560,7 @@ def do_check(kind, src, at, market):
         return ident
 
 
-def do_install(kind, src, at, enable=True, quiet_update=False):
+def do_install(kind, src, at, enable=True, quiet_update=False, market=False):
     if kind not in CHECKS:
         raise Fail(f"an appimage is one file, not a git repo: try import-appimage")
     with tempfile.TemporaryDirectory(prefix="aequalyn-store-") as tmp:
@@ -580,6 +580,9 @@ def do_install(kind, src, at, enable=True, quiet_update=False):
             staged.rename(dest)
         d = db_load()
         d[f"{kind}:{ident}"] = dict(meta, kind=kind, id=ident, source=src, commit=commit or at or "")
+        if market:
+            # from the catalog: its updates are the reviewed ones, never the repo's newest
+            d[f"{kind}:{ident}"]["market"] = True
         db_save(d)
         activate(kind, ident, enable and not quiet_update)
         say(f"OK  {kind} '{ident}' installed" + (f" at {commit[:12]}" if commit else ""))
@@ -668,6 +671,19 @@ def do_update(kind, ident):
     rec = db_load().get(f"{kind}:{ident}")
     if not rec:
         raise Fail(f"'{ident}' was not installed by the Store")
+    if rec.get("market"):
+        try:
+            it = next((i for i in market_items() if i.get("kind") == kind and i.get("id") == ident
+                       and i.get("repo") == rec["source"]), None)
+        except Fail:
+            it = None
+        if not it:
+            raise Fail(f"'{ident}' is not in the catalog any more (or there is none yet): it stays as it is")
+        if it.get("commit") == rec.get("commit"):
+            say(f"OK  {kind} '{ident}' is the newest reviewed one")
+            return
+        do_install(kind, rec["source"], it["commit"], enable=False, quiet_update=True, market=True)
+        return
     do_install(kind, rec["source"], None, enable=False, quiet_update=True)
 
 
@@ -780,7 +796,13 @@ def market_items():
                             repo=it.get("repo") or urlparse(str(it.get("url", ""))).netloc, state=state))
         else:
             rec = d.get(f"{kind}:{it.get('id')}")
-            if rec:
+            # an app is pacman's once it is built: removed there, it is gone here too
+            if rec and kind == "app" and run(["pacman", "-Q"] + list(rec.get("packages") or ["-"])).returncode:
+                rec = None
+            # the same name from another repo is another item
+            if rec and rec.get("source") and rec.get("source") != it.get("repo"):
+                state = "another installed"
+            elif rec:
                 state = "installed" if rec.get("commit") == it.get("commit") else "update available"
             out.append(dict(it, state=state))
     return out
@@ -820,6 +842,28 @@ def do_install_market_appimage(it):
         import_appimage_file(out, url, sha)
 
 
+def do_build_market(it):
+    """an app: its PKGBUILD at the reviewed commit, built and installed by makepkg, which
+    asks for the password itself (the Store opens this in a terminal)"""
+    if os.geteuid() == 0:
+        raise Fail("an app is built as you, not as root")
+    if not shutil.which("makepkg"):
+        raise Fail("makepkg is missing: install base-devel")
+    with tempfile.TemporaryDirectory(prefix="aequalyn-store-") as tmp:
+        root, commit = fetch(it["repo"], it["commit"], tmp)
+        if commit != it["commit"] or not (root / "PKGBUILD").is_file():
+            raise Fail("that commit has no PKGBUILD")
+        step(f"Building {it.get('name') or it['id']} at {commit[:12]}")
+        names = re.findall(r"(?m)^\s*pkgname = (\S+)", run(["makepkg", "--printsrcinfo"], cwd=root).stdout)
+        if subprocess.call(["makepkg", "-si", "--needed"], cwd=root):
+            raise Fail("it was not built, or not installed")
+        d = db_load()
+        d[f"app:{it['id']}"] = {"kind": "app", "id": it["id"], "label": it.get("name") or it["id"], "version": "",
+                                "repo": it["repo"], "source": it["repo"], "commit": commit, "packages": names, "market": True}
+        db_save(d)
+        say(f"OK  app '{it['id']}' installed at {commit[:12]}")
+
+
 def do_install_market(ident):
     # "theme:lichen", since two kinds may share a name; a bare id still finds the first
     kind, _, name = ident.rpartition(":")
@@ -829,11 +873,16 @@ def do_install_market(ident):
     if it["kind"] == "appimage":
         do_install_market_appimage(it)
         return
-    if it["kind"] not in CHECKS:
-        raise Fail(f"a {it['kind']} installs from its own page (build it with makepkg in a terminal)")
+    if it["kind"] not in CHECKS and it["kind"] != "app":
+        raise Fail(f"the Store cannot install a {it['kind']}")
     if not re.match(r"^[0-9a-f]{40}$", str(it.get("commit", ""))):
         raise Fail(f"the catalog has no pinned commit for '{ident}'")
-    do_install(it["kind"], it["repo"], it["commit"])
+    if it["kind"] == "app":
+        do_build_market(it)
+        return
+    if it.get("state") == "another installed":
+        raise Fail(f"another {it['kind']} called '{it['id']}' is installed: remove it first")
+    do_install(it["kind"], it["repo"], it["commit"], market=True)
 
 
 # ---- apps from every backend ------------------------------------------------------------------
@@ -1923,6 +1972,9 @@ def main(argv):
     if cmd == "update-all":
         failed = []
         for rec in list(db_load().values()):
+            if rec.get("kind") == "app":
+                say(f"   {rec['id']}: an app is built again from its own page")
+                continue
             if rec.get("kind") == "appimage":
                 say(f"   {rec['id']}: an AppImage is kept as it is (import it again to replace it)")
                 continue
