@@ -1,0 +1,297 @@
+#!/usr/bin/env bash
+# aequalyn-apply-fonts -- apply UI/mono fonts from settings.json across the desktop.
+set -euo pipefail
+
+CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
+SETTINGS="$CONF_DIR/aequalyn/settings.json"
+
+get() {
+  local path="$1" def="$2" v=""
+  if [[ -f "$SETTINGS" ]] && command -v jq >/dev/null 2>&1; then
+    v=$(jq -r "$path // empty" "$SETTINGS" 2>/dev/null || true)
+  fi
+  printf '%s' "${v:-$def}"
+}
+
+# one run at a time, so two changes in a row cannot write over each other
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/aequalyn-apply-fonts.$(id -u).lock"
+command -v flock >/dev/null 2>&1 && flock 9
+
+# put <new> <file>: in place of it in one step, with its mode
+put() { chmod --reference="$2" "$1" 2>/dev/null || chmod 644 "$1"; mv -f "$1" "$2"; }
+
+# set_line <file> <key> <value>: one key of an ini file, the rest kept
+set_line() {
+  [[ -f "$1" ]] || printf '[Settings]\n' > "$1"
+  local tmp; tmp=$(mktemp "$CONF_DIR/.aq-font.XXXXXX")
+  awk -v k="$2" -v v="$3" '
+    index($0, k "=") == 1 { if (!d) print k "=" v; d = 1; next }
+    { print }
+    END { if (!d) print k "=" v }
+  ' "$1" > "$tmp" && put "$tmp" "$1"
+}
+
+UI_FONT=$(get '.uiFont // .appearance.uiFont' 'Inter')
+MONO_FONT=$(get '.monoFont // .appearance.monoFont' 'JetBrainsMono Nerd Font')
+UI_SIZE=$(get '.fontSize // .appearance.fontSize' '11')
+FONT_AA=$(get '.fontAntialiasing' 'true')
+FONT_HINT=$(get '.fontHinting' 'slight')
+FONT_RGBA=$(get '.fontSubpixel' 'rgb')
+
+# fc_name <family>: as a fontconfig pattern, where - : , and \ mean something
+fc_name() { printf '%s' "$1" | sed 's/[\\:,-]/\\&/g'; }
+# xml <text>: for fonts.conf
+xml() { printf '%s' "$1" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
+
+[[ "$UI_SIZE" =~ ^[0-9]+$ ]] || UI_SIZE=11
+
+mkdir -p "$CONF_DIR/kitty" "$CONF_DIR/foot" "$CONF_DIR/fuzzel" "$CONF_DIR/gtk-3.0" "$CONF_DIR/qt6ct" "$CONF_DIR/fontconfig"
+
+# What a terminal uses for the letters and icons the mono font lacks.
+ICON_FONT="JetBrainsMono Nerd Font"
+
+# First, since it needs no measuring: an open foot follows at once.
+# Foot
+if [[ -f "$CONF_DIR/foot/foot.ini" ]]; then
+  tmp=$(mktemp "$CONF_DIR/.aq-font.XXXXXX")
+  foot_font="$(fc_name "$MONO_FONT"):size=$UI_SIZE"
+  [[ "$MONO_FONT" == "$ICON_FONT" ]] || foot_font+=",$ICON_FONT:size=$UI_SIZE"
+  F="$foot_font" awk '
+    BEGIN{done=0; tweak=0; warn=0; f=ENVIRON["F"]}
+    /^\[/ && !done {print "font=" f; done=1}
+    /^\[tweak\]/ {tweak=1}
+    /^\[/ && !/^\[tweak\]/ {if(tweak && !warn){print "font-monospace-warn=no"; warn=1} tweak=0}
+    /^font=/ {print "font=" f; done=1; next}
+    /^font-monospace-warn=/ {if(tweak){print "font-monospace-warn=no"; warn=1; next}}
+    {print}
+    END{
+      if(tweak && !warn) print "font-monospace-warn=no"
+      if(!done) print "font=" f
+    }
+  ' "$CONF_DIR/foot/foot.ini" > "$tmp" && put "$tmp" "$CONF_DIR/foot/foot.ini"
+  if ! grep -q '^\[tweak\]' "$CONF_DIR/foot/foot.ini"; then
+    printf '
+[tweak]
+font-monospace-warn=no
+' >> "$CONF_DIR/foot/foot.ini"
+  fi
+  # Open windows follow: Aequalyn's foot reads its fonts again on this signal (aequalyn-pkgs,
+  # pkgbuilds/foot); any other foot ignores it.
+  pkill -URG -u "$(id -u)" -x foot 2>/dev/null || true
+fi
+
+# monospaced <family>: every letter there, all of one width
+monospaced() {
+  local file
+  [[ "$(fc-match -f '%{family}' "$(fc_name "$1")" 2>/dev/null)" == *"$1"* ]] || return 1
+  file=$(fc-match -f '%{file}' "$(fc_name "$1")" 2>/dev/null) || return 1
+  python3 - "$file" 2>/dev/null <<'EOF'
+import sys
+try:
+    from fontTools.ttLib import TTFont
+except ImportError:
+    sys.exit(0)                     # cannot tell: as chosen
+f = TTFont(sys.argv[1], fontNumber=0, lazy=True)
+cmap, hmtx = f.getBestCmap() or {}, f["hmtx"]
+need = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+sys.exit(0 if all(ord(c) in cmap for c in need) and len({hmtx[cmap[ord(c)]][0] for c in need}) == 1 else 1)
+EOF
+}
+# The fonts as chosen go everywhere, monospaced or not. Kitty alone takes only monospaced
+# families: its grid comes from this one (the mono font, or its monospaced sibling), and
+# the letters from the mono font (symbol_map, below).
+GRID_FONT="JetBrainsMono Nerd Font"
+for f in "$MONO_FONT" "$MONO_FONT Mono" "${MONO_FONT% Sans} Mono"; do
+  if monospaced "$f"; then GRID_FONT=$f; break; fi
+done
+# kitty_map <family> <grid family>: the letters the family has, and the grid as wide as
+# its widest small letter (kitty shrinks what does not fit)
+kitty_map() {
+  python3 - "$1" "$(fc-match -f '%{file}' "$(fc_name "$1")")" "$(fc-match -f '%{file}' "$(fc_name "$2")")" 2>/dev/null <<'EOF'
+import sys
+from fontTools.ttLib import TTFont
+from fontTools.pens.boundsPen import BoundsPen
+font, grid = (TTFont(p, fontNumber=0, lazy=True) for p in sys.argv[2:4])
+cmap, glyphs = font.getBestCmap() or {}, font.getGlyphSet()
+blocks = ((0x21, 0x7E), (0xA1, 0x2FF), (0x370, 0x5FF), (0x1E00, 0x1FFF), (0x2010, 0x205E), (0x20A0, 0x20BF))
+runs = []
+for lo, hi in blocks:
+    for c in range(lo, hi + 1):
+        if c not in cmap:
+            continue
+        if runs and runs[-1][1] == c - 1:
+            runs[-1][1] = c
+        else:
+            runs.append([c, c])
+if ord("m") not in cmap:
+    sys.exit(0)
+print("symbol_map", ",".join("U+%X-U+%X" % tuple(r) for r in runs), sys.argv[1])
+wide = 0
+for c in "abcdefghijklmnopqrstuvwxyz0123456789":
+    if ord(c) in cmap:
+        pen = BoundsPen(glyphs)
+        glyphs[cmap[ord(c)]].draw(pen)
+        if pen.bounds:
+            wide = max(wide, pen.bounds[2] - min(pen.bounds[0], 0))
+cell = grid["hmtx"][grid.getBestCmap()[ord("m")]][0] / grid["head"].unitsPerEm
+print("modify_font cell_width %d%%" % min(160, max(100, round(100 * wide / font["head"].unitsPerEm / cell))))
+EOF
+}
+KITTY_MAP=""
+if [[ "$GRID_FONT" != "$MONO_FONT" ]]; then KITTY_MAP=$(kitty_map "$MONO_FONT" "$GRID_FONT" || true); fi
+
+
+AA_BOOL=false; HINT_STYLE=hintslight; RGBA=rgb
+[[ "$FONT_AA" == "true" ]] && AA_BOOL=true
+case "$FONT_HINT" in none) HINT_STYLE=hintnone ;; medium) HINT_STYLE=hintmedium ;; full) HINT_STYLE=hintfull ;; *) HINT_STYLE=hintslight ;; esac
+case "$FONT_RGBA" in bgr|vrgb|vbgr|none) RGBA="$FONT_RGBA" ;; *) RGBA=rgb ;; esac
+
+
+# Kitty
+if [[ -f "$CONF_DIR/kitty/kitty.conf" ]]; then
+  tmp=$(mktemp "$CONF_DIR/.aq-font.XXXXXX")
+  F="$GRID_FONT" M="$KITTY_MAP" awk -v s="$UI_SIZE.0" '
+    BEGIN{ff=0;fs=0;f=ENVIRON["F"];m=ENVIRON["M"]}
+    /^# aequalyn-font/ {skip=1; next}
+    skip && /^(symbol_map|modify_font cell_width) / {next}
+    {skip=0}
+    /^font_family[[:space:]]+/ {print "font_family      " f; if(m!="" && !ff) print "# aequalyn-font\n" m; ff=1; next}
+    /^font_size[[:space:]]+/ {print "font_size        " s; fs=1; next}
+    {print}
+    END{if(!ff) {print "font_family      " f; if(m!="") print "# aequalyn-font\n" m} if(!fs) print "font_size        " s}
+  ' "$CONF_DIR/kitty/kitty.conf" > "$tmp" && put "$tmp" "$CONF_DIR/kitty/kitty.conf"
+fi
+
+# Every kitty reads its config again on this signal, font and size included.
+pkill -USR1 -u "$(id -u)" -x kitty 2>/dev/null || true
+
+# gsettings (GTK apps)
+if command -v gsettings >/dev/null 2>&1; then
+  gsettings set org.gnome.desktop.interface font-name "$UI_FONT $UI_SIZE" >/dev/null 2>&1 || true
+  gsettings set org.gnome.desktop.interface monospace-font-name "$MONO_FONT $UI_SIZE" >/dev/null 2>&1 || true
+  gsettings set org.gnome.desktop.interface document-font-name "$UI_FONT $UI_SIZE" >/dev/null 2>&1 || true
+  gsettings set org.gnome.desktop.interface font-antialiasing "$( [[ "$FONT_AA" == "true" ]] && echo rgba || echo none )" >/dev/null 2>&1 || true
+  gsettings set org.gnome.desktop.interface font-hinting "$FONT_HINT" >/dev/null 2>&1 || true
+  gsettings set org.gnome.desktop.interface font-rgba-order "$RGBA" >/dev/null 2>&1 || true
+fi
+# Fuzzel
+if [[ -f "$CONF_DIR/fuzzel/fuzzel.ini" ]]; then
+  tmp=$(mktemp "$CONF_DIR/.aq-font.XXXXXX")
+  F="$(fc_name "$MONO_FONT")" awk -v s="$UI_SIZE" '
+    BEGIN{f=ENVIRON["F"]; inmain=0; done=0}
+    /^\[main\]/ {inmain=1; print; next}
+    /^\[/ {if(inmain && !done){print "font=" f ":size=" s; done=1} inmain=0; print; next}
+    {if(inmain && /^font=/){print "font=" f ":size=" s; done=1; next} print}
+    END{if(inmain && !done) print "font=" f ":size=" s}
+  ' "$CONF_DIR/fuzzel/fuzzel.ini" > "$tmp" && put "$tmp" "$CONF_DIR/fuzzel/fuzzel.ini"
+fi
+
+# Alacritty (best effort)
+if [[ -f "$CONF_DIR/alacritty/alacritty.toml" ]]; then
+  tmp=$(mktemp "$CONF_DIR/.aq-font.XXXXXX")
+  awk -v f="$MONO_FONT" -v s="$UI_SIZE" '
+    BEGIN{infont=0}
+    /^\[font\]/ {infont=1; print; next}
+    /^\[/ {infont=0; print; next}
+    {if(infont && /^size[[:space:]]*=/){print "size = " s; next} if(infont && /^normal[[:space:]]*=[[:space:]]*\{/){print "normal = { family = \"" f "\" }"; next} print}
+  ' "$CONF_DIR/alacritty/alacritty.toml" > "$tmp" && put "$tmp" "$CONF_DIR/alacritty/alacritty.toml"
+fi
+
+
+# GTK 3 and 4: the font alone; theme, icons and cursor stay as they are
+set_line "$CONF_DIR/gtk-3.0/settings.ini" gtk-font-name "$UI_FONT $UI_SIZE"
+mkdir -p "$CONF_DIR/gtk-4.0"
+set_line "$CONF_DIR/gtk-4.0/settings.ini" gtk-font-name "$UI_FONT $UI_SIZE"
+
+# Qt 6 and Qt 5 (qt6ct, qt5ct): both watch their file, so open apps follow
+for qt in qt6ct qt5ct; do
+  [[ -f "$CONF_DIR/$qt/$qt.conf" ]] || continue
+  tmp=$(mktemp "$CONF_DIR/$qt/.aq-font.XXXXXX")
+  awk -v ui="$UI_FONT" -v mono="$MONO_FONT" -v s="$UI_SIZE" '
+    /^general=/ {print "general=\"" ui "," s ",-1,5,400,0,0,0,0,0,0,0,0,0,0,1\""; next}
+    /^fixed=/ {print "fixed=\"" mono "," s ",-1,5,400,0,0,0,0,0,0,0,0,0,0,1\""; next}
+    {print}
+  ' "$CONF_DIR/$qt/$qt.conf" > "$tmp" && put "$tmp" "$CONF_DIR/$qt/$qt.conf"
+done
+
+# fontconfig: set default sans/monospace and rendering for apps that honor it
+# alias_to <font> <family...>: asked for any of these names, apps get the font
+alias_to() {
+  local font name; font=$(xml "$1"); shift
+  for name in "$@"; do
+    printf '  <alias binding="same">\n    <family>%s</family>\n    <prefer><family>%s</family></prefer>\n  </alias>\n' "$name" "$font"
+  done
+}
+tmp=$(mktemp "$CONF_DIR/.aq-font.XXXXXX")
+cat > "$tmp" <<EOF
+<?xml version='1.0'?>
+<!DOCTYPE fontconfig SYSTEM 'urn:fontconfig:fonts.dtd'>
+<fontconfig>
+$(alias_to "$UI_FONT" sans-serif serif system-ui ui-sans-serif ui-serif ui-rounded -apple-system BlinkMacSystemFont)
+$(alias_to "$MONO_FONT" monospace ui-monospace)
+  <match target="font">
+    <edit name="antialias" mode="assign"><bool>$AA_BOOL</bool></edit>
+    <edit name="hinting" mode="assign"><bool>true</bool></edit>
+    <edit name="hintstyle" mode="assign"><const>$HINT_STYLE</const></edit>
+    <edit name="rgba" mode="assign"><const>$RGBA</const></edit>
+    <edit name="lcdfilter" mode="assign"><const>lcddefault</const></edit>
+  </match>
+</fontconfig>
+EOF
+[[ -f "$CONF_DIR/fontconfig/fonts.conf" ]] || : > "$CONF_DIR/fontconfig/fonts.conf"
+put "$tmp" "$CONF_DIR/fontconfig/fonts.conf"
+
+# Hyprlock
+if [[ -f "$CONF_DIR/hypr/hyprlock.conf" ]]; then
+  tmp=$(mktemp "$CONF_DIR/.aq-font.XXXXXX")
+  awk -v f="$UI_FONT" '
+    /^\$font[[:space:]]*=/ {print "$font = " f; done=1; next}
+    {print}
+    END{if(!done) print "$font = " f}
+  ' "$CONF_DIR/hypr/hyprlock.conf" > "$tmp" && put "$tmp" "$CONF_DIR/hypr/hyprlock.conf"
+fi
+
+# Matugen hyprlock template (if present)
+if [[ -f "$CONF_DIR/matugen/templates/hyprlock.conf" ]]; then
+  tmp=$(mktemp "$CONF_DIR/.aq-font.XXXXXX")
+  awk -v f="$UI_FONT" '
+    /^\$font[[:space:]]*=/ {print "$font = " f; done=1; next}
+    {print}
+  ' "$CONF_DIR/matugen/templates/hyprlock.conf" > "$tmp" && put "$tmp" "$CONF_DIR/matugen/templates/hyprlock.conf"
+fi
+
+# SDDM theme config (best effort)
+for f in /usr/share/sddm/themes/aequalyn/theme.conf "$CONF_DIR/sddm/aequalyn/theme.conf"; do
+  [[ -f "$f" ]] || continue
+  tmp=$(mktemp "$CONF_DIR/.aq-font.XXXXXX")
+  awk -v f="$UI_FONT" '
+    BEGIN{done=0}
+    /^fontFamily=/ {print "fontFamily=" f; done=1; next}
+    {print}
+    END{if(!done) print "fontFamily=" f}
+  ' "$f" > "$tmp" && { cat "$tmp" > "$f"; } 2>/dev/null || true; rm -f "$tmp"
+done
+
+# The rest takes longer and shows later (KDE apps, the lock screen, the titlebar): in
+# the background, so the next change is not kept waiting.
+(
+  # KDE/Plasma best effort
+  if command -v kwriteconfig6 >/dev/null 2>&1; then
+    kwriteconfig6 --file kdeglobals --group General --key font "$UI_FONT,$UI_SIZE,-1,5,400,0,0,0,0,0,0,0,0,0,0,1" >/dev/null 2>&1 || true
+    kwriteconfig6 --file kdeglobals --group General --key fixed "$MONO_FONT,$UI_SIZE,-1,5,400,0,0,0,0,0,0,0,0,0,0,1" >/dev/null 2>&1 || true
+    kwriteconfig6 --file kdeglobals --group General --key smallestReadableFont "$UI_FONT,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1" >/dev/null 2>&1 || true
+    kwriteconfig6 --file kdeglobals --group General --key toolBarFont "$UI_FONT,$UI_SIZE,-1,5,400,0,0,0,0,0,0,0,0,0,0,1" >/dev/null 2>&1 || true
+    kwriteconfig6 --file kdeglobals --group General --key menuFont "$UI_FONT,$UI_SIZE,-1,5,400,0,0,0,0,0,0,0,0,0,0,1" >/dev/null 2>&1 || true
+    # open KDE apps read it again (notifyChange, 1: the fonts)
+    if command -v dbus-send >/dev/null 2>&1; then
+      dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange int32:1 int32:0 >/dev/null 2>&1 || true
+    fi
+  fi
+
+
+  # The floating titlebar reads the font when Hyprland loads its config: only then is a
+  # reload needed.
+  if command -v hyprctl >/dev/null 2>&1 && [[ "$(hyprctl plugin list 2>/dev/null)" == *hyprbars* ]]; then
+    hyprctl reload >/dev/null 2>&1 || true
+  fi
+) 9>&- </dev/null >/dev/null 2>&1 &
