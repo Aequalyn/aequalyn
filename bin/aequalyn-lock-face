@@ -1,0 +1,72 @@
+#!/bin/bash
+# aequalyn-lock-face -- face unlock (Glance) on the hyprlock lock screens.
+#
+#   aequalyn-lock-face bind      Space looks for the face while hyprlock is up
+#   aequalyn-lock-face unbind    Space is a plain key again
+#   aequalyn-lock-face scan      one scan: unlocks, or says it can be tried again
+#   aequalyn-lock-face status    the line the lock screen shows
+#
+# hyprlock has no keys of its own to bind, so Hyprland holds Space for it (a bind that
+# works while locked), made when the lock is there and taken away when it goes. Shift +
+# Space still types a space, for a password with one in it. A scan is never a password
+# attempt: a face that is not recognised can be tried again as often as needed.
+set -u
+export PATH="$HOME/.local/bin:$PATH"
+
+RUN="${XDG_RUNTIME_DIR:-/tmp}/aequalyn-lock"
+mkdir -p -m 700 "$RUN" 2>/dev/null || true
+STATE="$RUN/face"
+
+lock_pid() { pgrep -u "$UID" -x hyprlock | head -n 1; }
+locked() { [[ -n "$(lock_pid)" ]] && aequalyn-lock-stranded >/dev/null 2>&1; }
+show() {
+    printf '%s' "$1" > "$STATE"
+    pkill -USR2 -u "$UID" -x hyprlock 2>/dev/null || true     # draws the line again
+}
+unbind() {
+    hyprctl eval 'pcall(hl.unbind, "SPACE")' >/dev/null 2>&1 || true
+    rm -f "$STATE"
+}
+
+case "${1:-}" in
+    bind)
+        command -v glancectl >/dev/null 2>&1 || exit 0
+        timeout 10 glancectl status 2>/dev/null | grep -qE '^enrolled:[[:space:]]+True' || exit 0
+        locked || exit 0
+        hyprctl eval "pcall(hl.unbind, \"SPACE\") hl.bind(\"SPACE\", hl.dsp.exec_cmd(\"$HOME/.local/bin/aequalyn-lock-face scan\"), { locked = true })" >/dev/null 2>&1 || exit 1
+        show "Space for face unlock, or type your password"
+        # unlocked in the meantime: nothing may be left bound
+        locked || unbind
+        ;;
+    unbind)
+        unbind
+        ;;
+    scan)
+        # a key left bound by a lock that is gone puts itself away
+        if ! locked; then unbind; exit 0; fi
+        exec 7>"$RUN/face.lock"
+        flock -n 7 || exit 0                                 # one scan at a time
+        pid=$(lock_pid)
+        show "Looking for your face…"
+        if timeout 20 glancectl authenticate --json >/dev/null 2>&1 7>&-; then
+            # the lock that was up when the scan began, and no other
+            [[ -n "$pid" && "$(lock_pid)" == "$pid" ]] || exit 0
+            kill -USR1 "$pid" 2>/dev/null || exit 0
+            # Closing, hyprlock drops the password prompt it had open, and PAM counts that
+            # as a wrong password. A recognised face is a login: as after a right password,
+            # the count starts again (else a few of these would lock sudo).
+            for _ in {1..50}; do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+            if ! kill -0 "$pid" 2>/dev/null; then
+                faillock ${AEQUALYN_FAILLOCK_DIR:+--dir "$AEQUALYN_FAILLOCK_DIR"} --user "$(id -un)" --reset >/dev/null 2>&1 || true
+            fi
+        elif [[ "$(lock_pid)" == "$pid" ]]; then
+            show "Face not recognised. Space to try again, or type your password"
+        fi
+        ;;
+    status)
+        cat "$STATE" 2>/dev/null || true
+        ;;
+    *)
+        awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0"
+        ;;
+esac

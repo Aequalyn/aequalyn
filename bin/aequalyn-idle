@@ -89,6 +89,8 @@ tmp=$(mktemp "${TMPDIR:-/tmp}/aequalyn-hypridle.XXXXXX") || exit 1
     # suspend would still pop the lock screen the user asked to turn off.
     if [[ "$lock_enabled" == "true" ]]; then
         echo "    before_sleep_cmd = aequalyn-lock lockForSleep; aequalyn-lock wait-secure 12"
+        # the machine sleeps once the session is locked, not before
+        echo "    inhibit_sleep = 3"
     fi
     echo "    after_sleep_cmd = aequalyn-lock wake"
     echo "    ignore_dbus_inhibit = false"

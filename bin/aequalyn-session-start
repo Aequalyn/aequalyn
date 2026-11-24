@@ -136,7 +136,7 @@ fi
 if command -v aequalyn-idle >/dev/null 2>&1; then
     aequalyn-idle >/dev/null 2>&1 || log "aequalyn-idle failed"
 elif command -v hypridle >/dev/null 2>&1; then
-    pgrep -x hypridle >/dev/null 2>&1 || hypridle >/dev/null 2>&1 &
+    pgrep -u "$UID" -x hypridle >/dev/null 2>&1 || hypridle >/dev/null 2>&1 &
 fi
 
 # Load the optional floating titlebar plugin only after Hyprland and the shell

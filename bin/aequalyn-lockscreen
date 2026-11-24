@@ -1,13 +1,12 @@
 #!/bin/bash
-# aequalyn-lockscreen: legacy hyprlock theme renderer, kept for reference and
-# for the SDDM login theme. The session lock is the Quickshell `lock` plugin:
-# `apply` only refreshes the cached wallpaper path, `try` locks through the plugin.
+# aequalyn-lockscreen: the ready made lock screens, drawn by hyprlock. "custom" is not one
+# of them: that is the shell's own lock (aequalyn-lock picks the one chosen in Settings).
 #
 #   aequalyn-lockscreen list            the designs
 #   aequalyn-lockscreen apply [name]    write ~/.config/hypr/hyprlock.conf from the one
 #                                       chosen in Settings (or `name`); "classic" is the
 #                                       one made from the wallpaper
-#   aequalyn-lockscreen try <name>      lock now with the Quickshell lock screen
+#   aequalyn-lockscreen try <name>      lock now with that one
 #
 # The colours come from ~/.config/aequalyn/lock-palette.json, which the shell writes
 # whenever the theme changes; the wallpaper is the one on the screen now (a still of it
@@ -33,6 +32,13 @@ color() {
     [[ -f "$PALETTE" ]] && v=$(jq -r --arg k "$1" '.[$k] // empty' "$PALETTE" 2>/dev/null || true)
     v=${v#\#}
     [[ "$v" =~ ^[0-9a-fA-F]{6}$ ]] && echo "${v,,}" || echo "$2"
+}
+
+# the desktop's UI font
+font() {
+    local f=""
+    [[ -f "$SETTINGS" ]] && f=$(jq -r '.uiFont // empty' "$SETTINGS" 2>/dev/null || true)
+    [[ "$f" =~ ^[A-Za-z0-9\ ._+-]+$ ]] && echo "$f" || echo "JetBrainsMono Nerd Font"
 }
 
 # the wallpaper on the screen now; a still frame of it when it is a moving one
@@ -69,9 +75,21 @@ render() {
         -e "s|{{ACCENT}}|$(color accentPrimary 7aa2f7)|g" \
         -e "s|{{ACCENT2}}|$(color accentCyan 7dcfff)|g" \
         -e "s|{{RED}}|$(color accentRed f7768e)|g" \
-        -e "s|{{FONT}}|JetBrainsMono Nerd Font|g" \
+        -e "s|{{FONT}}|$(font)|g" \
         -e "s|{{WALL}}|${wall//|/\\|}|g" \
         "$DIR/$name.conf" > "$dest"
+    # What every design shares. The password alone unlocks here: a face scan that fails
+    # must not count as a wrong password (pam_faillock would lock the account out). The
+    # face is for Space (aequalyn-lock-face), and this line says how that goes.
+    {
+        printf '\ngeneral {\n    ignore_empty_input = true\n}\n'
+        if [[ -f /etc/pam.d/aequalyn-lock-password ]]; then
+            printf '\nauth {\n    pam:enabled = true\n    pam:module = aequalyn-lock-password\n}\n'
+        fi
+        printf '\nlabel {\n    monitor =\n    text = cmd[update:0:1] "%s/.local/bin/aequalyn-lock-face" status\n' "$HOME"
+        printf '    font_size = 11\n    font_family = $font\n    color = rgba(%sff)\n' "$(color textMuted 8a8a8a)"
+        printf '    position = 0, 24\n    halign = center\n    valign = bottom\n}\n'
+    } >> "$dest"
 }
 
 case "${1:-}" in
@@ -80,6 +98,8 @@ case "${1:-}" in
         ;;
     apply)
         name=${2:-$(chosen)}
+        # the shell's own lock has no hyprlock design to write
+        [[ "$name" == custom ]] && exit 0
         # Classic: drawn from its own template too when there is one, so its colours and
         # wallpaper follow the theme; else the one made from the wallpaper, kept aside
         if [[ "$name" == classic && ! -f "$DIR/classic.conf" ]]; then
@@ -93,10 +113,11 @@ case "${1:-}" in
         mv -f "$tmp" "$OUT"
         ;;
     try)
-        # hyprlock is retired: the Quickshell lock plugin owns the session now.
+        # locks for real, with this design ("custom" is the shell's own lock)
+        if [[ "${2:-}" =~ ^[a-z0-9-]+$ ]]; then export AEQUALYN_LOCK_STYLE=$2; fi
         exec "$HOME/.local/bin/aequalyn-lock" lock
         ;;
     *)
-        sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
         ;;
 esac

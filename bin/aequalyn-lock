@@ -1,5 +1,5 @@
 #!/bin/bash
-# aequalyn-lock -- talk to the Aequalyn Quickshell session lock.
+# aequalyn-lock -- lock the session with the lock screen chosen in the control center.
 #
 #   aequalyn-lock lock          lock now
 #   aequalyn-lock lockForSleep  lock with the pre-suspend run-up
@@ -28,8 +28,115 @@ call() {
     exec qs ipc call -- "$TARGET" "$method" "$@"
 }
 
+say() { if (( ! QUIET )); then echo "$1"; fi; }
+
+# The lock screen is the one chosen on the Lock and sleep page, and only that one:
+# Custom is the shell's lock plugin, every ready made design is hyprlock.
+style() {
+    local s=${AEQUALYN_LOCK_STYLE:-}
+    [[ -n "$s" ]] || s=$(jq -r '.power.lockStyle // empty' "${XDG_CONFIG_HOME:-$HOME/.config}/aequalyn/settings.json" 2>/dev/null || true)
+    [[ "$s" =~ ^[a-z0-9-]+$ ]] || s=classic
+    echo "$s"
+}
+hyprlock_runs() { pgrep -u "$UID" -x hyprlock >/dev/null 2>&1; }
+held() { aequalyn-lock-stranded >/dev/null 2>&1; }       # the compositor holds a lock
+
+# hyprlock holds the session. It lives on for a moment after an unlock (and before its
+# lock is there): that is waited out, as nothing is locked then.
+hyprlock_locked() {
+    local i
+    for (( i = 0; i < 6; i++ )); do
+        hyprlock_runs || return 1
+        held && return 0
+        sleep 0.1
+    done
+    pkill -KILL -u "$UID" -x hyprlock 2>/dev/null || true
+    sleep 0.2
+    return 1
+}
+
+# ok | already-locked | missing-pam | "" (the plugin is off, or the shell is down)
+plugin_lock() { timeout 3 qs ipc call -- "$TARGET" "$1" 2>/dev/null 8>&- || true; }
+# the plugin holds the session, or is just about to
+plugin_locked() {
+    local st i
+    for (( i = 0; i < 15; i++ )); do
+        st=$(timeout 3 qs ipc call -- "$TARGET" status 2>/dev/null 8>&-) || return 1
+        jq -e '.secure or .sessionLocked' <<<"$st" >/dev/null 2>&1 && return 0
+        jq -e '.requested' <<<"$st" >/dev/null 2>&1 || return 1
+        sleep 0.1
+    done
+    return 1
+}
+
+# the design hyprlock.conf was last written from
+written() {
+    local l
+    l=$(head -n 1 "${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hyprlock.conf" 2>/dev/null) || return 0
+    grep -q 'aequalyn-lock-face' "${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hyprlock.conf" || return 0
+    [[ "$l" =~ ^"# Aequalyn lock screen: "([A-Za-z ]+) ]] || return 0
+    l=${BASH_REMATCH[1],,}
+    echo "${l// /}"
+}
+
+# true once hyprlock holds the session; false when it could not start or gave up
+hyprlock_lock() { # <design> <lock|lockForSleep>
+    local pid i fast=""
+    command -v hyprlock >/dev/null 2>&1 || return 1
+    # settings, theme and wallpaper changes write it already: only another design is new
+    [[ "$(written)" == "$1" ]] || aequalyn-lockscreen apply "$1" >/dev/null 2>&1 || true
+    [[ -s "${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hyprlock.conf" ]] || return 1
+    [[ "$2" == lockForSleep ]] && fast="--immediate-render --no-fade-in"
+    # with the display back on once it is unlocked
+    setsid bash -c "hyprlock $fast; aequalyn-lock-face unbind; aequalyn-lock-wake" >/dev/null 2>&1 </dev/null 8>&- &
+    pid=$!
+    # as long as it takes to start (a slow disk): only its end means it failed
+    for (( i = 0; i < 100; i++ )); do
+        if hyprlock_runs && held; then
+            # Space looks for the face, for as long as this lock is up
+            setsid aequalyn-lock-face bind >/dev/null 2>&1 </dev/null 8>&- &
+            return 0
+        fi
+        kill -0 "$pid" 2>/dev/null || return 1
+        sleep 0.1
+    done
+    return 1
+}
+
+# One locker at a time, whoever asks (idle, sleep, a key, the power menu): nothing is
+# started over a lock that is held, because with misc:allow_session_lock_restore Hyprland
+# would let the second one take it over. The other one locks only when the chosen one
+# cannot (plugin off, PAM missing, hyprlock not there): an open session would be worse.
+lock_once() {
+    local reply="" try want
+    exec 8>"${XDG_RUNTIME_DIR:-/tmp}/aequalyn-lock.$UID.lock"
+    if command -v flock >/dev/null 2>&1; then flock -w 12 8 || true; fi
+    if hyprlock_locked || plugin_locked; then say already-locked; return 0; fi
+    want=$(style)
+    if [[ "$want" != custom ]]; then
+        if hyprlock_lock "$want" "$1"; then say ok; return 0; fi
+        if hyprlock_locked; then say already-locked; return 0; fi
+    fi
+    for try in 1 2 3; do
+        reply=$(plugin_lock "$1")
+        case "$reply" in
+            ok|already-locked) say "$reply"; return 0 ;;
+            missing-pam) break ;;
+        esac
+        if (( try < 3 )); then sleep 0.5; fi       # the shell may be restarting
+    done
+    if held; then say already-locked; return 0; fi
+    if [[ "$want" == custom ]] && hyprlock_lock classic "$1"; then say fallback; return 0; fi
+    say "${reply:-unavailable}"
+    return 1
+}
+
 case "${1:-status}" in
-    lock|lockForSleep|status|isLocked|check|wake|noteSleep)
+    lock|lockForSleep)
+        lock_once "$1" ;;
+    isLocked)
+        if { hyprlock_runs && held; } || plugin_locked; then say locked; else say unlocked; fi ;;
+    status|check|wake|noteSleep)
         call "$1" ;;
     wait-secure)
         limit=${2:-12}
@@ -37,6 +144,10 @@ case "${1:-status}" in
         while (( SECONDS < deadline )); do
             if status=$(qs ipc call -- "$TARGET" status 2>/dev/null) \
                && jq -e '.secure == true' <<<"$status" >/dev/null 2>&1; then
+                echo secure
+                exit 0
+            fi
+            if pgrep -u "$UID" -x hyprlock >/dev/null 2>&1 && aequalyn-lock-stranded >/dev/null 2>&1; then
                 echo secure
                 exit 0
             fi
