@@ -65,5 +65,21 @@ with tempfile.TemporaryDirectory() as tmp:
         r = store(*args)
         ok(r.returncode != 0 and "Traceback" not in r.stderr, "refused, not crashed: " + " ".join(args))
 
+# a plugin's place on the bar: a .qml file beside plugin.json, or none
+with tempfile.TemporaryDirectory() as tmp:
+    for name, widget, good in (("none", None, True), ("there", "BarWidget.qml", True), ("gone", "Other.qml", False),
+                               ("out", "../BarWidget.qml", False), ("odd", 5, False), ("behind", "BarWidget.qml", False)):
+        d = pathlib.Path(tmp) / name
+        d.mkdir()
+        man = {"id": "try-me", "label": "Try", "entry": "Try.qml", "icon": "x", "group": "background" if name == "behind" else "screen", "keys": "", "about": "a",
+               "version": "1.0.0", "repo": "https://github.com/someone/try-me"}
+        if widget is not None:
+            man["widget"] = widget
+        (d / "plugin.json").write_text(json.dumps(man))
+        for f in ("Try.qml", "BarWidget.qml", "Preview.qml"):
+            (d / f).write_text("import QtQuick\nItem { property var theme: null }\n")
+        r = subprocess.run([sys.executable, str(STORE), "check", "plugin", str(d)], capture_output=True, text=True, timeout=60)
+        ok(any(w in r.stdout + r.stderr for w in ("widget must name", "has no widget")) != good, f"widget {name}: {(r.stdout + r.stderr)[-160:]}")
+
 print(f"store: {fails} failures")
 sys.exit(1 if fails else 0)

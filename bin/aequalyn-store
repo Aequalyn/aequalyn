@@ -361,6 +361,11 @@ def check_plugin(root, src, market):
     body = re.sub(r"(?m)^\s*(import|pragma|//).*$", "", entry.read_text())
     if re.match(r"\s*ShellRoot\b", body):
         raise Fail("the entry is a ShellRoot: it must be an Item")
+    widget = man.get("widget", "")
+    if widget and not (isinstance(widget, str) and re.match(r"^[A-Za-z0-9_-]+\.qml$", widget) and (root / widget).is_file()):
+        raise Fail("plugin.json: widget must name a .qml file beside plugin.json (its place on the bar)")
+    if widget and man.get("group") not in ("screen", "key"):
+        raise Fail("plugin.json: a background plugin runs in its sandbox and has no widget")
     qml = sorted(root.rglob("*.qml"))
     # what QML starts or imports is the plugin's too: its scripts and helpers
     helpers = sorted(p for p in root.rglob("*") if p.is_file() and p.suffix not in (".qml", ".md", ".json")
