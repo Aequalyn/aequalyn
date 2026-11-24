@@ -1,0 +1,395 @@
+# Aequalyn Plymouth theme
+# Animated mark + circular loader + LUKS password dialog + retry/failure + scaling.
+
+# ---- Tuning ------------------------------------------------------------------
+# Called once per refresh frame; Plymouth runs this at 50 fps.
+REFRESH_HZ = 50;
+SPINNER_STEP = 0.25;     # degrees per frame -> one full turn every ~29 s
+
+# Time from pressing Enter in the LUKS dialog until Plymouth hands the screen
+# over to the display manager: key derivation + dm-crypt setup + mount +
+# switch-root + userspace up to plymouth-quit.
+# Written per machine by bin/aequalyn-plymouth-calibrate (runs during the
+# Plymouth migration); on hardware slower than this estimate the bar keeps
+# creeping instead of parking at full, and it is snapped full on quit.
+BOOT_SECONDS = 4.6;
+
+# Live media has no passphrase to unlock, so there is no submit to start the
+# bar from. The ISO build switches this to 1 and the bar runs with the splash;
+# installs keep 0 and start counting when the passphrase is answered.
+START_BAR_ON_SPLASH = 0;
+
+# ---- Background ---------------------------------------------------------------
+Window.SetBackgroundTopColor(0.0784, 0.1647, 0.1882);
+Window.SetBackgroundBottomColor(0.0784, 0.1647, 0.1882);
+
+# ---- Load base images --------------------------------------------------------
+logo_base = Image("logo.png");
+ring_track_base = Image("track.png");
+ring_spinner_base = Image("spinner.png");
+box_base = Image("box.png");
+lock_base = Image("lock.png");
+entry_base = Image("entry.png");
+entry_error_base = Image("entry_error.png");
+bullet_base = Image("bullet.png");
+pbox_base = Image("progress_box.png");
+pbar_base = Image("progress_bar.png");
+
+# ---- Scaling -----------------------------------------------------------------
+# Worked out from the screen's size, and again whenever that changes: on hybrid
+# graphics (and whenever the firmware's framebuffer hands over to the real GPU
+# driver) the screen changes resolution while the splash is up, and a layout made
+# for the old size left the mark off centre.
+fun relayout() {
+    global.screen_w = Window.GetWidth();
+    global.screen_h = Window.GetHeight();
+    s = Math.Min(global.screen_w, global.screen_h) / 1080.0;
+    if (s < 0.55) s = 0.55;
+    if (s > 2.5) s = 2.5;
+    global.scale = s;
+
+    global.logo_size = Math.Int(180 * s);
+    global.logo_img = logo_base.Scale(global.logo_size, global.logo_size);
+
+    global.ring_size = Math.Int(230 * s);
+    global.ring_track_img = ring_track_base.Scale(global.ring_size, global.ring_size);
+    global.ring_spinner_img = ring_spinner_base.Scale(global.ring_size, global.ring_size);
+
+    global.box_w = Math.Int(box_base.GetWidth() * s);
+    global.box_h = Math.Int(box_base.GetHeight() * s);
+    global.box_img = box_base.Scale(global.box_w, global.box_h);
+
+    global.lock_w = Math.Int(lock_base.GetWidth() * s);
+    global.lock_h = Math.Int(lock_base.GetHeight() * s);
+    global.lock_img = lock_base.Scale(global.lock_w, global.lock_h);
+
+    global.entry_w = Math.Int(entry_base.GetWidth() * s);
+    global.entry_h = Math.Int(entry_base.GetHeight() * s);
+    global.entry_img = entry_base.Scale(global.entry_w, global.entry_h);
+    global.entry_error_img = entry_error_base.Scale(global.entry_w, global.entry_h);
+
+    global.bullet_w = Math.Int(bullet_base.GetWidth() * s);
+    global.bullet_h = Math.Int(bullet_base.GetHeight() * s);
+    global.bullet_img = bullet_base.Scale(global.bullet_w, global.bullet_h);
+
+    global.pbox_w = Math.Int(pbox_base.GetWidth() * s);
+    global.pbox_h = Math.Int(pbox_base.GetHeight() * s);
+    global.pbox_img = pbox_base.Scale(global.pbox_w, global.pbox_h);
+
+    global.pbar_h = Math.Int(pbar_base.GetHeight() * s);
+    global.pbar_base_scaled = pbar_base.Scale(Math.Int(pbar_base.GetWidth() * s), global.pbar_h);
+
+    global.cx = Window.GetX() + global.screen_w / 2;
+    global.cy = Window.GetY() + global.screen_h / 2;
+}
+relayout();
+
+# ---- State -------------------------------------------------------------------
+status = "normal";
+spinner_angle = 0;
+logo_opacity_angle = 0;
+fail_timer = 0;
+fail_active = 0;
+submit_seen = 0;      # a password was submitted and the theme went back to normal
+retry = 0;            # the current prompt is a retry, i.e. the last password was wrong
+prev_bullets = 0;
+post_submit = START_BAR_ON_SPLASH;   # the boot bar is running
+post_submit_frames = 0;   # frames since that answer
+progress_px = 0;
+mode = Plymouth.GetMode();
+# shutting down or restarting: the mark alone, no loader ring and no bar
+logo_only = 0;
+if (mode == "shutdown" || mode == "reboot") logo_only = 1;
+if (logo_only == 1) post_submit = 0;
+
+# ---- Sprites -----------------------------------------------------------------
+logo_sprite = Sprite(logo_img);
+logo_sprite.SetOpacity(1);
+
+ring_track_sprite = Sprite(ring_track_img);
+ring_spinner_sprite = Sprite(ring_spinner_img);
+
+# (positioned by place(), below)
+
+# dialog (lazy)
+dialog = 0;
+dialog_box = 0;
+dialog_lock = 0;
+dialog_entry = 0;
+dialog_bullets = [];
+dialog_visible = 0;
+dialog_y = 0;
+
+fun dialog_setup() {
+    if (dialog == 1) return;
+    db = Sprite(box_img);
+    dl = Sprite(lock_img);
+    de = Sprite(entry_img);
+
+    global.dialog_box = db;
+    global.dialog_lock = dl;
+    global.dialog_entry = de;
+    global.dialog = 1;
+    global.dialog_bullets = [];
+    dialog_place();
+}
+
+# the dialog sits directly underneath the mark, horizontally centred
+fun dialog_place() {
+    if (dialog == 0) return;
+    dialog_box.SetImage(box_img);
+    dialog_lock.SetImage(lock_img);
+    if (global.retry == 1) dialog_entry.SetImage(entry_error_img);
+    else dialog_entry.SetImage(entry_img);
+
+    content_w = lock_w + Math.Int(12 * scale) + entry_w;
+    dby = cy + ring_size / 2 + Math.Int(34 * scale);
+    dialog_box.SetPosition(cx - box_w / 2, dby, 10000);
+    dlx = cx - content_w / 2;
+    dialog_lock.SetPosition(dlx, dby + box_h / 2 - lock_h / 2, 10001);
+    dex = dlx + lock_w + Math.Int(12 * scale);
+    dialog_entry.SetPosition(dex, dby + box_h / 2 - entry_h / 2, 10001);
+    global.dialog_y = dby;
+
+    for (i = 0; dialog_bullets[i]; i++) {
+        bsx = dex + Math.Int(10 * scale) + i * (bullet_w + Math.Int(4 * scale));
+        bsy = dby + box_h / 2 - entry_h / 2 + entry_h / 2 - bullet_h / 2;
+        dialog_bullets[i].sprite.SetImage(bullet_img);
+        dialog_bullets[i].sprite.SetPosition(bsx, bsy, 10002);
+    }
+}
+
+fun dialog_opacity(op) {
+    if (dialog == 0) return;
+    dialog_box.SetOpacity(op);
+    dialog_lock.SetOpacity(op);
+    dialog_entry.SetOpacity(op);
+    for (i = 0; dialog_bullets[i]; i++) {
+        dialog_bullets[i].sprite.SetOpacity(op);
+    }
+}
+
+fun display_normal_callback() {
+    # Plymouth returns to the normal animation whenever a password is answered;
+    # if it then asks again, the answer was rejected.
+    if (global.status == "password") {
+        global.submit_seen = 1;
+        # the measured boot window starts when the password is submitted
+        global.post_submit = 1;
+        global.post_submit_frames = 0;
+        global.progress_px = 0;
+    }
+    global.status = "normal";
+    global.retry = 0;
+    if (dialog == 1) {
+        dialog_entry.SetImage(entry_img);
+        dialog_opacity(0);
+    }
+    global.dialog_visible = 0;
+}
+
+fun display_password_callback(prompt, bullets) {
+    global.status = "password";
+    global.dialog_visible = 1;
+    if (dialog == 0) dialog_setup();
+    else dialog_opacity(1);
+
+    # a fresh prompt right after an answered one means the last password failed
+    if (global.submit_seen == 1) {
+        global.submit_seen = 0;
+        global.retry = 1;
+        global.fail_active = 1;
+        global.fail_timer = 26;
+        # start the boot bar over on the next (hopefully correct) attempt
+        global.post_submit = 0;
+        global.post_submit_frames = 0;
+        global.progress_px = 0;
+    }
+
+    # keep the field red for the whole retry prompt, not just a flash
+    if (global.retry == 1) dialog_entry.SetImage(entry_error_img);
+    else dialog_entry.SetImage(entry_img);
+
+    # update bullets
+    for (index = 0; dialog_bullets[index] || index < bullets; index++) {
+        if (!dialog_bullets[index]) {
+            bs = Sprite(bullet_img);
+            bsx = dialog_entry.GetX() + Math.Int(10 * scale) + index * (bullet_w + Math.Int(4 * scale));
+            bsy = dialog_entry.GetY() + entry_h / 2 - bullet_h / 2;
+            bs.SetPosition(bsx, bsy, 10002);
+            dialog_bullets[index].sprite = bs;
+            dialog_bullets[index].x = bsx;
+            dialog_bullets[index].y = bsy;
+        }
+        if (index < bullets) dialog_bullets[index].sprite.SetOpacity(1);
+        else dialog_bullets[index].sprite.SetOpacity(0);
+    }
+    global.prev_bullets = bullets;
+}
+
+fun display_message_callback(text) {
+    # show messages between the mark and the password field
+    msg_img = Image.Text(text, 1, 1, 1, 1, "Sans 12");
+    msg_sprite = Sprite(msg_img);
+    msgy = cy + ring_size / 2 + Math.Int(8 * scale);
+    if (dialog == 1) msgy = dialog_y - msg_img.GetHeight() - Math.Int(6 * scale);
+    msg_sprite.SetPosition(cx - msg_img.GetWidth()/2, msgy, 10003);
+    global.message_sprite = msg_sprite;
+}
+
+fun hide_message_callback(text) {
+    if (global.message_sprite) global.message_sprite.SetOpacity(0);
+}
+
+Plymouth.SetDisplayNormalFunction(display_normal_callback);
+Plymouth.SetDisplayPasswordFunction(display_password_callback);
+Plymouth.SetDisplayMessageFunction(display_message_callback);
+Plymouth.SetHideMessageFunction(hide_message_callback);
+
+# ---- Progress bar (updates) --------------------------------------------------
+pbox_sprite = Sprite(pbox_img);
+pbar_sprite = Sprite();
+pbox_sprite.SetOpacity(0);
+pbar_sprite.SetOpacity(0);
+
+# Every sprite where the current layout puts it, at its current size.
+fun place() {
+    logo_sprite.SetImage(logo_img);
+    ring_track_sprite.SetImage(ring_track_img);
+    logo_sprite.SetPosition(cx - logo_size / 2, cy - logo_size / 2, 5);
+    ring_track_sprite.SetPosition(cx - ring_size / 2, cy - ring_size / 2, 4);
+    ring_spinner_sprite.SetPosition(cx - ring_size / 2, cy - ring_size / 2, 6);
+
+    pbox_sprite.SetImage(pbox_img);
+    pbox_y = cy + Math.Int(120 * scale);
+    pbox_sprite.SetPosition(cx - pbox_w / 2, pbox_y, 10);
+    pbar_sprite.SetPosition(cx - pbar_base_scaled.GetWidth() / 2, pbox_y + (pbox_h - pbar_h) / 2, 11);
+    # the bar's image is redrawn at the new width on the next frame
+    global.progress_px = 0;
+
+    dialog_place();
+}
+place();
+
+# The bar is driven by BOOT_SECONDS from the password answer in
+# refresh_callback(); Plymouth's own boot-progress updates are not usable here
+# (nothing drives SetBootProgressFunction during this initramfs/systemd boot).
+
+# ---- Quit --------------------------------------------------------------------
+fun quit_callback() {
+    logo_sprite.SetOpacity(0);
+    ring_track_sprite.SetOpacity(0);
+    ring_spinner_sprite.SetOpacity(0);
+    # never hand over to SDDM with a bar that is not full
+    if (global.post_submit == 1) {
+        pbar_sprite.SetImage(pbar_base_scaled);
+        pbar_sprite.SetOpacity(1);
+        pbox_sprite.SetOpacity(1);
+    }
+    if (dialog == 1) dialog_opacity(0);
+}
+Plymouth.SetQuitFunction(quit_callback);
+
+# ---- Refresh -----------------------------------------------------------------
+fun refresh_callback() {
+    if (Window.GetWidth() != screen_w || Window.GetHeight() != screen_h) {
+        relayout();
+        place();
+    }
+
+    # the loader only turns once a password has been submitted
+    if (global.status != "password") {
+        global.spinner_angle += SPINNER_STEP;
+        if (global.spinner_angle >= 360) global.spinner_angle = 0;
+    }
+
+    # rotate spinner
+    rotated = ring_spinner_img.Rotate(global.spinner_angle);
+    ring_spinner_sprite.SetImage(rotated);
+
+    # logo pulse in normal mode
+    if (status == "normal") {
+        logo_opacity_angle += (2 * Math.Pi / 50) * 0.4;
+        op = (Math.Cos(logo_opacity_angle) + 1) / 2;
+        op = op * 0.4 + 0.6;
+        logo_sprite.SetOpacity(op);
+        # center
+        logo_sprite.SetPosition(cx - logo_size / 2, cy - logo_size / 2, 5);
+        ring_track_sprite.SetPosition(cx - ring_size / 2, cy - ring_size / 2, 4);
+        ring_spinner_sprite.SetPosition(cx - ring_size / 2, cy - ring_size / 2, 6);
+        ring_track_sprite.SetOpacity(0.5);
+        ring_spinner_sprite.SetOpacity(0.9);
+    } else {
+        logo_sprite.SetOpacity(1);
+        logo_sprite.SetPosition(cx - logo_size / 2, cy - logo_size / 2, 5);
+        ring_track_sprite.SetOpacity(0.2);
+        ring_spinner_sprite.SetOpacity(0.6);
+    }
+
+    # boot bar: starts on the password answer and fills over BOOT_SECONDS.
+    # Up to the estimate it is linear; past it the slope decays so a slower
+    # machine still sees movement instead of a bar stuck at 100%. The quit
+    # callback snaps it full, so it never reaches the end on its own.
+    if (global.status == "password") {
+        pbar_sprite.SetOpacity(0);
+        pbox_sprite.SetOpacity(0);
+    } else if (global.post_submit == 1) {
+        global.post_submit_frames += 1;
+        u = global.post_submit_frames / (BOOT_SECONDS * REFRESH_HZ);
+        if (u <= 1) {
+            p = 0.85 * u;
+        } else {
+            p = 0.85 + 0.15 * (1 - 1 / (1 + 5.6667 * (u - 1)));
+        }
+        pw = Math.Int(pbar_base_scaled.GetWidth() * p);
+        if (pw < 1) pw = 1;
+        if (pw != global.progress_px) {
+            global.progress_px = pw;
+            pbar_sprite.SetImage(pbar_base_scaled.Scale(pw, pbar_h));
+        }
+        pbar_sprite.SetOpacity(1);
+        pbox_sprite.SetOpacity(1);
+    } else {
+        pbar_sprite.SetOpacity(0);
+        pbox_sprite.SetOpacity(0);
+    }
+
+    # dialog shake on failure
+    if (fail_active == 1 && dialog == 1 && dialog_visible == 1) {
+        if (fail_timer > 0) {
+            shake = Math.Sin(fail_timer * 1.2) * 8 * scale;
+            dialog_box.SetPosition(cx - box_w / 2 + shake, dialog_y, 10000);
+            # lock/entry follow
+            content_w = lock_w + Math.Int(12 * scale) + entry_w;
+            dialog_lock.SetPosition(cx - content_w / 2 + shake, dialog_y + box_h / 2 - lock_h / 2, 10001);
+            dialog_entry.SetPosition(cx - content_w / 2 + lock_w + Math.Int(12 * scale) + shake, dialog_y + box_h / 2 - entry_h / 2, 10001);
+            fail_timer -= 1;
+        } else {
+            fail_active = 0;
+            # reset positions
+            dialog_box.SetPosition(cx - box_w / 2, dialog_y, 10000);
+            content_w = lock_w + Math.Int(12 * scale) + entry_w;
+            dialog_lock.SetPosition(cx - content_w / 2, dialog_y + box_h / 2 - lock_h / 2, 10001);
+            dialog_entry.SetPosition(cx - content_w / 2 + lock_w + Math.Int(12 * scale), dialog_y + box_h / 2 - entry_h / 2, 10001);
+        }
+    }
+
+    # shutdown/reboot: only the mark (it keeps its slow pulse)
+    if (logo_only == 1) {
+        ring_track_sprite.SetOpacity(0);
+        ring_spinner_sprite.SetOpacity(0);
+        pbar_sprite.SetOpacity(0);
+        pbox_sprite.SetOpacity(0);
+    }
+}
+
+Plymouth.SetRefreshFunction(refresh_callback);
+
+# initial opacity for track/spinner (none when shutting down or restarting)
+if (logo_only == 1) {
+    ring_track_sprite.SetOpacity(0);
+    ring_spinner_sprite.SetOpacity(0);
+} else {
+    ring_track_sprite.SetOpacity(0.5);
+    ring_spinner_sprite.SetOpacity(0.9);
+}

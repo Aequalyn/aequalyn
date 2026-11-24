@@ -1,0 +1,19 @@
+.DS_Store
+**/__pycache__/
+*.pyc
+
+# shell is its own repository (aequalyn-shell)
+shell/
+
+# web app keybinds: generated per home by aequalyn-webapp (hyprland.lua's
+# include_optional finds it), never shipped -- a committed one would carry
+# apps the default set no longer has
+config/hypr/webapps.lua
+
+# the lock-screen configs generated from the running wallpaper
+# (config/hypr/lockscreens/.classic, .wallpaper, ... -- per-machine state,
+# written there by aequalyn-lockscreen / aequalyn-themes; the templates next
+# to them are what ships)
+config/hypr/lockscreens/.*
+!config/hypr/lockscreens/.*.conf
+

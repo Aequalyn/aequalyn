@@ -1,0 +1,1200 @@
+#!/usr/bin/env python3
+"""aequalyn-webapp -- websites in their own window.
+
+A web app is a desktop entry (so it shows up in the launcher) plus a small
+launch helper: Chromium-based browsers get ``--app=URL``; Firefox-based
+browsers get an isolated profile, ``--no-remote`` and a userChrome.css that
+hides the browser chrome, which is the closest equivalent.
+
+Usage:
+  aequalyn-webapp list [--json]
+  aequalyn-webapp add --name NAME --url URL [--icon REF] [--key KEY] [--category CAT]
+  aequalyn-webapp set-category SLUG|NAME CAT     (CAT "" or "none": no category)
+  aequalyn-webapp categories [--json]
+  aequalyn-webapp category-add LABEL
+  aequalyn-webapp category-rename ID LABEL
+  aequalyn-webapp category-remove ID              (its web apps keep no category)
+  aequalyn-webapp remove (--slug SLUG | --name NAME)
+  aequalyn-webapp launch SLUG|NAME
+  aequalyn-webapp browsers [--json]
+  aequalyn-webapp set-browser BROWSER
+  aequalyn-webapp seed [--browser BROWSER]
+  aequalyn-webapp sync
+
+State lives in ~/.config/aequalyn/webapps.json:
+
+  {
+    "version": 1,
+    "browser": "auto",            # auto | chromium | google-chrome | firefox | ...
+    "apps": [
+      {"name": "Reddit", "slug": "reddit", "url": "https://www.reddit.com/",
+       "key": "D", "icon": "aequalyn-webapp-reddit", "category": "social"}
+    ]
+  }
+
+"categories" is the user's own list, [{"id": "chat", "label": "Chat"}, ...]; while it
+is not in the file, it is BUILTIN_CATEGORIES. An app's "category" is an id from it, or
+absent. It goes into the desktop entry's Keywords (and, for the built-in ones, its
+Categories), so the launcher finds the app by it, and the control center filters web
+apps by it.
+
+`sync` writes ~/.local/share/applications/aequalyn-webapp-<slug>.desktop,
+copies/generates icons and rewrites ~/.config/hypr/webapps.lua (one keybind
+per app, Super + Shift + <key>). `add`, `remove` and `seed` call it.
+
+HOME is honoured, so the installer can seed a target home:
+
+  HOME=/mnt/home/alice python3 bin/aequalyn-webapp seed --browser chromium
+
+Set AEQUALYN_WEBAPP_DRY_RUN=1 to print the browser command instead of running
+it (used by the tests).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import http.client
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+HOME = Path(os.environ.get("HOME") or str(Path.home()))
+CONFIG_DIR = HOME / ".config" / "aequalyn"
+CONFIG_FILE = CONFIG_DIR / "webapps.json"
+DESKTOP_DIR = HOME / ".local" / "share" / "applications"
+ICON_DIR = HOME / ".local" / "share" / "icons" / "hicolor" / "256x256" / "apps"
+SCALABLE_ICON_DIR = HOME / ".local" / "share" / "icons" / "hicolor" / "scalable" / "apps"
+PROFILE_BASE = HOME / ".local" / "share" / "aequalyn" / "webapps" / "profiles"
+HYPR_FILE = HOME / ".config" / "hypr" / "webapps.lua"
+
+DESKTOP_PREFIX = "aequalyn-webapp-"
+GENERIC_ICON = "applications-internet"
+
+# Letters already used by Aequalyn's own Super + Shift bindings (window
+# movement, recording, power menu, ...). Web app keys never take these.
+RESERVED_KEYS = set("ACLMNORSWV")
+FREE_KEYS = "BDEFGHIJKPQTUXYZ"
+
+# The categories a web app starts with: (id, label, extra desktop Categories). Every web
+# app keeps Network;WebBrowser; the extra ones come after. The user's own list (in
+# webapps.json) can add, rename and remove categories; ids never change, so a renamed
+# built-in one keeps its desktop Categories.
+BUILTIN_CATEGORIES = [
+    ("chat",        "Chat",        "Chat;InstantMessaging;"),
+    ("mail",        "Mail",        "Email;"),
+    ("social",      "Social",      ""),
+    ("video",       "Video",       "AudioVideo;Video;"),
+    ("music",       "Music",       "AudioVideo;Audio;Music;"),
+    ("ai",          "AI",          "Utility;"),
+    ("development", "Development", "Development;"),
+    ("office",      "Office",      "Office;"),
+    ("news",        "News",        "News;"),
+    ("shopping",    "Shopping",    ""),
+    ("games",       "Games",       "Game;"),
+    ("other",       "Other",       ""),
+]
+DESKTOP_CATEGORIES = {cid: extra for cid, _, extra in BUILTIN_CATEGORIES}
+
+
+def categories(cfg: dict) -> list:
+    """The user's categories, [{"id", "label"}], in their order."""
+    raw = cfg.get("categories")
+    if not isinstance(raw, list):
+        return [{"id": cid, "label": label} for cid, label, _ in BUILTIN_CATEGORIES]
+    out, seen = [], set()
+    for c in raw:
+        if not isinstance(c, dict):
+            continue
+        cid, label = c.get("id"), c.get("label")
+        if not isinstance(cid, str) or not isinstance(label, str):
+            continue
+        if not re.fullmatch(r"[a-z0-9-]{1,40}", cid) or cid in seen or not label.strip():
+            continue
+        out.append({"id": cid, "label": label.strip()})
+        seen.add(cid)
+    return out
+
+
+def category_label(cfg: dict, cid: str) -> str:
+    for c in categories(cfg):
+        if c["id"] == cid:
+            return c["label"]
+    return ""
+
+
+def validate_category_label(label: str) -> str:
+    label = (label or "").strip()
+    if not label:
+        die("a category needs a name")
+    if len(label) > 32:
+        die("a category name is at most 32 characters")
+    if any(ord(ch) < 32 for ch in label) or ";" in label:
+        die("a category name cannot hold control characters or ';'")
+    return label
+
+
+def clean_category(cfg: dict, value: str) -> str:
+    """A category id from the user's list (by id or name), "" for none."""
+    v = (value or "").strip().lower()
+    if v in ("", "none"):
+        return ""
+    cats = categories(cfg)
+    for c in cats:
+        if v == c["id"] or v == c["label"].lower():
+            return c["id"]
+    die("unknown category: %s (one of: %s)" % (value, ", ".join(c["label"] for c in cats) or "none yet"))
+
+
+def category_of(app: dict, cfg: dict) -> str:
+    c = str(app.get("category") or "")
+    return c if category_label(cfg, c) else ""
+
+
+DEFAULT_APPS = [
+    {"name": "Reddit", "slug": "reddit", "url": "https://www.reddit.com/",
+     "key": "D", "icon": "aequalyn-webapp-reddit",
+     "category": "social"},
+    {"name": "ChatGPT", "slug": "chatgpt", "url": "https://chatgpt.com/",
+     "key": "G", "icon": "aequalyn-webapp-chatgpt",
+     "category": "ai"},
+    {"name": "YouTube", "slug": "youtube", "url": "https://www.youtube.com/",
+     "key": "T", "icon": "aequalyn-webapp-youtube",
+     "category": "video"},
+    {"name": "YouTube Music", "slug": "youtube-music",
+     "url": "https://music.youtube.com/", "key": "Y",
+     "icon": "aequalyn-webapp-youtube-music", "category": "music"},
+    {"name": "WhatsApp", "slug": "whatsapp", "url": "https://web.whatsapp.com/",
+     "key": "H", "icon": "aequalyn-webapp-whatsapp",
+     "category": "chat"},
+    {"name": "Gmail", "slug": "gmail", "url": "https://mail.google.com/",
+     "key": "E", "icon": "aequalyn-webapp-gmail",
+     "category": "mail"},
+    {"name": "GitHub", "slug": "github", "url": "https://github.com/",
+     "key": "B", "icon": "aequalyn-webapp-github",
+     "category": "development"},
+]
+
+# id -> (label, kind, binary, desktop id)
+BROWSERS = {
+    "chromium":       ("Chromium",       "chromium", "chromium",           "chromium.desktop"),
+    "google-chrome":  ("Google Chrome",  "chromium", "google-chrome-stable", "google-chrome.desktop"),
+    "brave":          ("Brave",          "chromium", "brave-browser",      "brave-browser.desktop"),
+    "brave-origin":   ("Brave Origin",  "chromium", "brave-origin",       "brave-origin.desktop"),
+    "microsoft-edge": ("Microsoft Edge", "chromium", "microsoft-edge-stable", "microsoft-edge.desktop"),
+    "vivaldi":        ("Vivaldi",        "chromium", "vivaldi-stable",     "vivaldi-stable.desktop"),
+    "opera":          ("Opera",          "chromium", "opera",              "opera.desktop"),
+    "firefox":        ("Firefox",        "firefox",  "firefox",            "firefox.desktop"),
+    "zen":            ("Zen Browser",    "firefox",  "zen-browser",        "zen.desktop"),
+    "librewolf":      ("LibreWolf",      "firefox",  "librewolf",          "librewolf.desktop"),
+    "waterfox":       ("Waterfox",       "firefox",  "waterfox",           "waterfox.desktop"),
+    "floorp":         ("Floorp",         "firefox",  "floorp",             "floorp.desktop"),
+}
+CHROMIUM_ORDER = ["chromium", "google-chrome", "brave", "brave-origin", "microsoft-edge", "vivaldi", "opera"]
+FIREFOX_ORDER = ["firefox", "zen", "librewolf", "waterfox", "floorp"]
+
+# Package (and whether it comes from the AUR) used to install a browser on
+# demand from the settings app.
+BROWSER_PACKAGES = {
+    "chromium": ("chromium", False),
+    "google-chrome": ("google-chrome", True),
+    "brave": ("brave-bin", True),
+    "brave-origin": ("brave-origin-bin", True),
+    "microsoft-edge": ("microsoft-edge-stable-bin", True),
+    "vivaldi": ("vivaldi", False),
+    "opera": ("opera", True),
+    "firefox": ("firefox", False),
+    "zen": ("zen-browser-bin", True),
+    "librewolf": ("librewolf-bin", True),
+    "waterfox": ("waterfox-bin", True),
+    "floorp": ("floorp-bin", True),
+}
+
+# Wayland app-id prefix each Chromium variant uses for --app windows
+# (Chromium ignores --class and derives the id from the URL + profile).
+CHROMIUM_PREFIXES = {
+    "chromium": "chrome",
+    "google-chrome": "chrome",
+    "brave": "brave",
+    "brave-origin": "brave",
+    "microsoft-edge": "msedge",
+    "vivaldi": "vivaldi",
+    "opera": "opera",
+}
+
+
+def chromium_prefix(browser: str) -> str:
+    return CHROMIUM_PREFIXES.get(browser, "chrome")
+
+# Firefox SSB: hide the browser chrome so the window reads as an app.
+USER_CHROME = """/* Generated by aequalyn-webapp: hide navigation and tabs for an app window */
+#nav-bar, #TabsToolbar, #PersonalToolbar { display: none !important; }
+#navigator-toolbox { border-bottom: none !important; }
+"""
+USER_JS = """// Generated by aequalyn-webapp: Firefox web app profile
+user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("browser.sessionstore.resume_from_crash", false);
+user_pref("browser.tabs.warnOnClose", false);
+user_pref("browser.tabs.warnOnOpen", false);
+user_pref("browser.startup.page", 0);
+user_pref("browser.sessionstore.resume_session_once", false);
+"""
+
+ICON_COLORS = ["#e4572e", "#3b82f6", "#10b981", "#8b5cf6",
+               "#f59e0b", "#ef4444", "#06b6d4", "#ec4899"]
+
+
+# --------------------------------------------------------------- small helpers
+
+def die(msg: str, code: int = 1):
+    print(f"aequalyn-webapp: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def have(cmd: str) -> bool:
+    return shutil.which(cmd) is not None
+
+
+def run(cmd: list, check: bool = False, **kw):
+    try:
+        return subprocess.run(cmd, check=check, **kw)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def notify(summary: str, body: str = ""):
+    if have("notify-send"):
+        args = ["notify-send", "-a", "Aequalyn", summary]
+        if body:
+            args.append(body)
+        run(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def asset_dir() -> Path:
+    here = Path(__file__).resolve().parent.parent
+    candidates = []
+    override = os.environ.get("AEQUALYN_ASSETS")
+    if override:
+        candidates.append(Path(override) / "webapps")
+    candidates += [
+        here / "assets" / "webapps",
+        Path("/usr/share/aequalyn/assets/webapps"),
+        Path("/opt/aequalyn/assets/webapps"),
+        HOME / ".local" / "share" / "aequalyn" / "assets" / "webapps",
+    ]
+    for c in candidates:
+        if c.is_dir():
+            return c
+    return here / "assets" / "webapps"
+
+
+def atomic_write(path: Path, text: str, mode: int = 0o644):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+# --------------------------------------------------------------------- state
+
+def load_config(create: bool = False) -> dict:
+    if CONFIG_FILE.is_file():
+        try:
+            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            die(f"cannot read {CONFIG_FILE}: {exc}")
+        if not isinstance(data, dict):
+            die(f"{CONFIG_FILE} is not a JSON object")
+        data.setdefault("version", 1)
+        data.setdefault("browser", "auto")
+        data.setdefault("apps", [])
+        if not isinstance(data["apps"], list):
+            data["apps"] = []
+        return data
+    data = {"version": 1, "browser": "auto", "apps": []}
+    if create:
+        save_config(data)
+    return data
+
+
+def save_config(cfg: dict):
+    atomic_write(CONFIG_FILE, json.dumps(cfg, indent=2, ensure_ascii=False) + "\n")
+
+
+def slugify(name: str) -> str:
+    s = name.strip().lower()
+    s = re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+    return s or "webapp"
+
+
+def unique_slug(cfg: dict, base: str) -> str:
+    taken = {a.get("slug") for a in cfg.get("apps", [])}
+    slug, n = base, 2
+    while slug in taken:
+        slug = f"{base}-{n}"
+        n += 1
+    return slug
+
+
+def validate_name(name: str) -> str:
+    name = (name or "").strip()
+    if not name:
+        die("the app name cannot be empty")
+    if "/" in name or "\n" in name or "\r" in name or "\t" in name:
+        die("the app name cannot contain slashes, tabs or newlines")
+    if len(name) > 64:
+        die("the app name is too long (64 characters at most)")
+    return name
+
+
+def normalize_url(url: str) -> str:
+    url = (url or "").strip()
+    if not url:
+        die("the URL cannot be empty")
+    if re.search(r"\s", url):
+        die("the URL cannot contain spaces")
+    if not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", url):
+        url = "https://" + url
+    if not re.match(r"^https?://", url, re.I):
+        die("only http and https URLs can become web apps")
+    return url
+
+
+def host_of(url: str) -> str:
+    try:
+        return (urllib.parse.urlparse(url).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def find_app(cfg: dict, key: str) -> dict:
+    want = (key or "").strip().lower()
+    for app in cfg.get("apps", []):
+        if app.get("slug", "").lower() == want or app.get("name", "").lower() == want:
+            return app
+    die(f"no web app named {key!r}")
+
+
+def pick_key(cfg: dict, name: str) -> str:
+    used = {str(a.get("key", "")).upper() for a in cfg.get("apps", [])}
+    words = re.findall(r"[A-Za-z0-9]", name)
+    for ch in words:
+        ch = ch.upper()
+        if ch not in used and ch not in RESERVED_KEYS:
+            return ch
+    for ch in FREE_KEYS:
+        if ch not in used:
+            return ch
+    return ""
+
+
+def shortcut(key: str) -> str:
+    return f"Super + Shift + {key}" if key else ""
+
+
+# ------------------------------------------------------------------ browsing
+
+def desktop_installed(desktop: str) -> bool:
+    for base in (HOME / ".local/share/applications", Path("/usr/local/share/applications"),
+                 Path("/usr/share/applications")):
+        if (base / desktop).is_file():
+            return True
+    return False
+
+
+def browser_installed(bid: str) -> bool:
+    _, _, binary, desktop = BROWSERS[bid]
+    return have(binary) or desktop_installed(desktop)
+
+
+def xdg_default_browser() -> str:
+    if not have("xdg-settings"):
+        return ""
+    try:
+        out = subprocess.run(["xdg-settings", "get", "default-web-browser"],
+                             capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    raw = out.stdout.strip().lower()
+    if raw.endswith(".desktop"):
+        raw = raw[:-8]
+    for bid, (_, _, _, desktop) in BROWSERS.items():
+        if raw == desktop[:-8] or raw == bid:
+            return bid
+    return ""
+
+
+def resolve_browser(cfg: dict) -> str:
+    configured = str(cfg.get("browser") or "auto").lower()
+
+    if configured in BROWSERS:
+        if browser_installed(configured):
+            return configured
+        # The configured browser is not installed (Zen before its first-boot
+        # AUR install, say): stay in the same family when possible.
+        kind = BROWSERS[configured][1]
+        order = CHROMIUM_ORDER if kind == "chromium" else FIREFOX_ORDER
+        for bid in order:
+            if browser_installed(bid):
+                return bid
+
+    default = xdg_default_browser()
+    if default and browser_installed(default):
+        return default
+
+    for bid in CHROMIUM_ORDER + FIREFOX_ORDER:
+        if browser_installed(bid):
+            return bid
+    return "chromium"
+
+
+def browser_options(cfg: dict) -> list:
+    options = [{"id": "auto", "label": "Auto (default browser)", "kind": "auto",
+                "available": True}]
+    for bid in CHROMIUM_ORDER + FIREFOX_ORDER:
+        label, kind, _, _ = BROWSERS[bid]
+        available = browser_installed(bid)
+        selected = str(cfg.get("browser") or "auto").lower() == bid
+        pkg, aur = BROWSER_PACKAGES.get(bid, ("", False))
+        if available or selected:
+            options.append({"id": bid, "label": label, "kind": kind,
+                            "available": available, "package": pkg, "aur": aur})
+    return options
+
+
+def browser_label(bid: str) -> str:
+    if bid == "auto":
+        return "Auto"
+    return BROWSERS.get(bid, (bid,))[0]
+
+
+# ---------------------------------------------------------------- app windows
+
+def window_class(app: dict, browser: str) -> str:
+    return f"{DESKTOP_PREFIX}{app['slug']}"
+
+
+def chromium_app_class(app: dict, browser: str = None) -> str:
+    """What a Chromium variant's --app window is actually called on Wayland."""
+    host = host_of(app["url"])
+    prefix = chromium_prefix(browser) if browser else "chrome"
+    return f"{prefix}-{host}__-Default" if host else ""
+
+
+def matching_windows(app: dict, browser: str) -> list:
+    if not have("hyprctl") or not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        return []
+    try:
+        out = subprocess.run(["hyprctl", "-j", "clients"], capture_output=True,
+                             text=True, timeout=5)
+        clients = json.loads(out.stdout or "[]")
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return []
+
+    wanted = {window_class(app, browser)}
+    chrome_prefix = ""
+    if BROWSERS[browser][1] == "chromium":
+        host = host_of(app["url"])
+        chrome_prefix = f"{chromium_prefix(browser)}-{host}__" if host else ""
+    hits = []
+    for c in clients:
+        classes = {str(c.get("class") or ""), str(c.get("initialClass") or "")}
+        if classes & wanted:
+            hits.append(c)
+        elif chrome_prefix and any(x.startswith(chrome_prefix) for x in classes):
+            hits.append(c)
+    return hits
+
+
+def focus_window(address: str) -> bool:
+    # Hyprland 0.57's CLI dispatch speaks the Lua API; address is the only
+    # stable identifier (classes can be regex-hostile).
+    lua = ("local target=%s; for _, w in ipairs(hl.get_windows()) do "
+           "if w.address == target then hl.dispatch(hl.dsp.focus({ window = w })) "
+           "return end end") % json.dumps(address)
+    return run(["hyprctl", "eval", lua], stdout=subprocess.DEVNULL,
+               stderr=subprocess.DEVNULL) is not None
+
+
+def ensure_firefox_profile(app: dict, flavor: str) -> Path:
+    profile = PROFILE_BASE / app["slug"]
+    (profile / "chrome").mkdir(parents=True, exist_ok=True)
+    chrome = profile / "chrome" / "userChrome.css"
+    if not chrome.is_file():
+        atomic_write(chrome, USER_CHROME)
+    userjs = profile / "user.js"
+    if not userjs.is_file():
+        atomic_write(userjs, USER_JS)
+    return profile
+
+
+def launch_command(app: dict, browser: str) -> list:
+    _, kind, binary, _ = BROWSERS[browser]
+    url = app["url"]
+    if kind == "chromium":
+        # --class is still passed for X11; the Wayland app id comes from the URL.
+        return [binary, f"--app={url}", f"--class={window_class(app, browser)}",
+                f"--name={window_class(app, browser)}"]
+    profile = ensure_firefox_profile(app, browser)
+    cls = window_class(app, browser)
+    return [binary, f"--class={cls}", f"--name={cls}", f"--profile={profile}",
+            "--no-remote", "--new-window", url]
+
+
+def launch(app: dict, cfg: dict) -> int:
+    browser = resolve_browser(cfg)
+    hits = matching_windows(app, browser)
+    if hits:
+        focus_window(str(hits[0].get("address") or ""))
+        return 0
+
+    cmd = launch_command(app, browser)
+    if os.environ.get("AEQUALYN_WEBAPP_DRY_RUN") == "1":
+        print("BROWSER=%s" % browser)
+        print("CLASS=%s" % window_class(app, browser))
+        print("CMD: " + " ".join(cmd))
+        return 0
+    if not have(cmd[0]) and not Path(cmd[0]).is_file():
+        die(f"{cmd[0]} is not installed (chosen browser: {browser})")
+
+    env = os.environ.copy()
+    if browser in FIREFOX_ORDER and env.get("WAYLAND_DISPLAY"):
+        env.setdefault("MOZ_ENABLE_WAYLAND", "1")
+    try:
+        subprocess.Popen(cmd, env=env, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True, close_fds=True)
+    except OSError as exc:
+        die(f"could not launch {browser}: {exc}")
+    return 0
+
+
+# --------------------------------------------------------------------- icons
+
+def sniff_extension(data: bytes) -> str:
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "jpg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    head = data[:512].lstrip().lower()
+    if head.startswith(b"<svg") or head.startswith(b"<?xml"):
+        return "svg"
+    return ""
+
+
+def icon_dirs_for(ext: str) -> Path:
+    return SCALABLE_ICON_DIR if ext in ("svg",) else ICON_DIR
+
+
+def as_png(data: bytes) -> bytes:
+    """A picture an icon theme won't read (jpg, gif, webp, ico) as a PNG of at most
+    256 by 256, through ImageMagick; b"" when it can't be made."""
+    tool = "magick" if have("magick") else ("convert" if have("convert") else "")
+    if not tool:
+        return b""
+    try:
+        r = subprocess.run([tool, "-", "-background", "none", "-flatten", "-resize", "256x256>", "png:-"],
+                           input=data, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return b""
+    out = r.stdout if r.returncode == 0 else b""
+    return out if out[:8] == b"\x89PNG\r\n\x1a\n" else b""
+
+
+def save_icon_bytes(slug: str, data: bytes) -> str:
+    ext = sniff_extension(data)
+    if not ext:
+        return ""
+    # icon themes (and so the docks, the launcher and the bar) read only PNG and SVG
+    if ext not in ("png", "svg"):
+        data = as_png(data)
+        if not data:
+            return ""
+        ext = "png"
+    target = icon_dirs_for(ext) / f"{DESKTOP_PREFIX}{slug}.{ext}"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+    os.chmod(target, 0o644)
+    # an older copy in another format would be found first, or never: drop it
+    for d in (ICON_DIR, SCALABLE_ICON_DIR):
+        for old in d.glob(f"{DESKTOP_PREFIX}{slug}.*"):
+            if old != target:
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
+    return f"{DESKTOP_PREFIX}{slug}"
+
+
+def download_icon(slug: str, url: str) -> str:
+    if not (url.lower().startswith("http://") or url.lower().startswith("https://")):
+        return ""
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 aequalyn-webapp"})
+    try:
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = resp.read(2_000_000)
+    # http.client.InvalidURL was a ValueError until 3.14, which re-parented it
+    # under HTTPException: catch both, so a malformed URL can never take a
+    # seed or a sync down with it
+    except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException):
+        return ""
+    if len(data) < 64:
+        return ""
+    return save_icon_bytes(slug, data)
+
+
+# Names that differ between an app's slug and its dashboardicons slug.
+DASHBOARD_ALIASES = {
+    "x": ["x", "twitter"],
+    "gmail": ["gmail", "google-mail"],
+    "google-drive": ["google-drive", "googledrive", "google"],
+    "youtube-music": ["youtube-music", "youtubemusic"],
+    "chatgpt": ["chatgpt", "openai"],
+    "whatsapp": ["whatsapp"],
+    "reddit": ["reddit"],
+    "youtube": ["youtube"],
+    "tiktok": ["tiktok"],
+}
+
+
+def fetch_dashboard_icon(slug: str, name: str, url: str) -> str:
+    """Try to pull an icon from dashboardicons.com (homarr-labs/dashboard-icons)."""
+    names = []
+    seen = set()
+    # the raw display name is not one of dashboardicons' slugs, and one with a
+    # space in it ("youtube music") is not a legal URL path; slugify(name)
+    # already covers the same candidate
+    for cand in (slug, slugify(name)):
+        if cand and cand not in seen:
+            seen.add(cand)
+            names.append(cand)
+    for key in (slug, name.strip().lower()):
+        for a in DASHBOARD_ALIASES.get(key, []):
+            if a not in seen:
+                seen.add(a)
+                names.append(a)
+    host = host_of(url)
+    if host:
+        h = host.split(".")[0]
+        if h and h not in seen:
+            seen.add(h)
+            names.append(h)
+    for n in names:
+        for fmt in ("png", "svg", "webp"):
+            # quote() is a no-op for every plain slug, and makes a candidate
+            # with a space or any other unsafe byte a legal URL path
+            got = download_icon(slug, "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/%s/%s.%s"
+                               % (fmt, urllib.parse.quote(n, safe=""), fmt))
+            if got:
+                return got
+    return ""
+
+
+def fetch_favicon(slug: str, url: str) -> str:
+    host = host_of(url)
+    if not host:
+        return ""
+    # Try a few predictable places: many sites (WhatsApp included) 404 on the
+    # Google cache but ship an apple-touch-icon or favicon.png of their own.
+    candidates = [
+        "https://www.google.com/s2/favicons?" +
+        urllib.parse.urlencode({"domain": host, "sz": "256"}),
+        "https://%s/apple-touch-icon.png" % host,
+        "https://%s/favicon.png" % host,
+    ]
+    for cand in candidates:
+        got = download_icon(slug, cand)
+        if got:
+            return got
+    return ""
+
+
+def letter_icon(slug: str, name: str) -> str:
+    # Fall back to a theme-provided icon rather than a generated SVG: every
+    # desktop (launcher, dock, settings) already knows how to render it, and
+    # a missing SVG would otherwise show up as "no icon".
+    return GENERIC_ICON
+
+
+def install_icon(app: dict, icon_ref: str = "") -> str:
+    """Return the icon name for the desktop entry and make sure it exists."""
+    slug = app["slug"]
+
+    if icon_ref:
+        ref = icon_ref.strip()
+        if ref.lower().startswith(("http://", "https://")):
+            return download_icon(slug, ref) or letter_icon(slug, app["name"])
+        p = Path(os.path.expanduser(ref))
+        if p.is_file():
+            try:
+                data = p.read_bytes()
+            except OSError:
+                data = b""
+            if data:
+                return save_icon_bytes(slug, data) or letter_icon(slug, app["name"])
+            return letter_icon(slug, app["name"])
+        return ref  # an icon theme name
+
+    # Prefer dashboardicons.com when available (online).
+    fetched = fetch_dashboard_icon(slug, app["name"], app["url"])
+    if fetched:
+        return fetched
+
+    # Seeded apps ship a bundled icon (offline fallback).
+    asset = asset_dir() / f"{slug}.png"
+    if asset.is_file():
+        data = asset.read_bytes()
+        return save_icon_bytes(slug, data) or letter_icon(slug, app["name"])
+
+    fetched = fetch_favicon(slug, app["url"])
+    if fetched:
+        return fetched
+    return letter_icon(slug, app["name"])
+
+
+def icon_file(name: str) -> str:
+    if not name:
+        return ""
+    if name.startswith("/"):
+        return name if Path(name).is_file() else ""
+    for d in (ICON_DIR, SCALABLE_ICON_DIR):
+        for ext in ("png", "svg", "webp", "jpg", "gif"):
+            f = d / f"{name}.{ext}"
+            if f.is_file():
+                return str(f)
+    return ""
+
+
+# ------------------------------------------------------------------ sync/out
+
+def desktop_string(value: str) -> str:
+    value = str(value).replace("\\", "\\\\")
+    value = value.replace("\t", "\\t").replace("\r", "\\r").replace("\n", "\\n")
+    return value
+
+
+def desktop_path(app: dict) -> Path:
+    return DESKTOP_DIR / f"{DESKTOP_PREFIX}{app['slug']}.desktop"
+
+
+def write_desktop(app: dict, browser: str, cfg: dict):
+    # Chromium's app windows get a URL-derived class; Firefox honours --class.
+    if BROWSERS[browser][1] == "chromium":
+        classes = chromium_app_class(app, browser)
+    else:
+        classes = window_class(app, browser)
+    lines = [
+        "[Desktop Entry]",
+        "Version=1.0",
+        "Type=Application",
+        f"Name={desktop_string(app['name'])}",
+        f"Comment={desktop_string('Web app: ' + app['url'])}",
+        f"Exec=aequalyn-webapp launch {app['slug']}",
+        f"Icon={desktop_string(app.get('icon') or GENERIC_ICON)}",
+        "Terminal=false",
+        "Categories=Network;WebBrowser;" + DESKTOP_CATEGORIES.get(category_of(app, cfg), ""),
+        "StartupNotify=true",
+    ]
+    if classes:
+        lines.append(f"StartupWMClass={desktop_string(classes)}")
+    cat = category_of(app, cfg)
+    lines.append("Keywords=webapp;web app;"
+                 + (desktop_string(category_label(cfg, cat).lower()) + ";" if cat else ""))
+    DESKTOP_DIR.mkdir(parents=True, exist_ok=True)
+    atomic_write(desktop_path(app), "\n".join(lines) + "\n", mode=0o755)
+
+
+def write_keybinds(cfg: dict):
+    lines = [
+        "-- Generated by aequalyn-webapp -- do not edit by hand.",
+        "-- Add, remove or change a web app in Settings -> Web apps; it rewrites this file.",
+        "-- Each app gets a Super + Shift + <key> binding.",
+        "",
+    ]
+    for app in cfg.get("apps", []):
+        key = str(app.get("key") or "").upper()
+        if not re.fullmatch(r"[A-Z0-9]", key):
+            continue
+        lines.append(f"-- {app['name']} ({app['url']})")
+        lines.append('hl.bind("SUPER + SHIFT + %s", hl.dsp.exec_cmd("aequalyn-webapp launch %s"))'
+                     % (key, app["slug"]))
+        lines.append("")
+    HYPR_FILE.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write(HYPR_FILE, "\n".join(lines))
+
+
+def refresh_caches():
+    DESKTOP_DIR.mkdir(parents=True, exist_ok=True)
+    if have("update-desktop-database"):
+        run(["update-desktop-database", str(DESKTOP_DIR)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    theme_root = HOME / ".local" / "share" / "icons" / "hicolor"
+    if theme_root.is_dir() and have("gtk-update-icon-cache"):
+        run(["gtk-update-icon-cache", "-f", "-t", str(theme_root)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if have("hyprctl") and os.environ.get("HYPRLAND_INSTANCE_SIGNATURE"):
+        run(["hyprctl", "reload"], stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
+
+
+def sync(cfg: dict):
+    DESKTOP_DIR.mkdir(parents=True, exist_ok=True)
+    browser = resolve_browser(cfg)
+    wanted = set()
+    changed = False
+    for app in cfg.get("apps", []):
+        icon = app.get("icon") or ""
+        if not icon or (icon.startswith(DESKTOP_PREFIX) and not icon_file(icon)):
+            new_icon = install_icon(app)
+            if new_icon and new_icon != app.get("icon"):
+                app["icon"] = new_icon
+                changed = True
+        write_desktop(app, browser, cfg)
+        wanted.add(desktop_path(app).name)
+    save_config(cfg)
+    # Drop launchers for apps that are no longer in the config.
+
+    # Drop launchers for apps that are no longer in the config.
+    for f in DESKTOP_DIR.glob(f"{DESKTOP_PREFIX}*.desktop"):
+        if f.name not in wanted:
+            try:
+                f.unlink()
+            except OSError:
+                pass
+    write_keybinds(cfg)
+    refresh_caches()
+
+
+# ------------------------------------------------------------------ commands
+
+def cmd_list(args) -> int:
+    cfg = load_config()
+    resolved = resolve_browser(cfg)
+    out = {
+        "browser": cfg.get("browser") or "auto",
+        "resolved": resolved,
+        "resolvedLabel": browser_label(resolved),
+        "browsers": browser_options(cfg),
+        "categories": [dict(c, count=sum(1 for a in cfg.get("apps", []) if category_of(a, cfg) == c["id"]))
+                       for c in categories(cfg)],
+        "apps": [],
+    }
+    for app in cfg.get("apps", []):
+        key = str(app.get("key") or "").upper()
+        out["apps"].append({
+            "name": app.get("name", ""),
+            "slug": app.get("slug", ""),
+            "url": app.get("url", ""),
+            "key": key,
+            "shortcut": shortcut(key),
+            "icon": app.get("icon") or GENERIC_ICON,
+            "iconFile": icon_file(app.get("icon") or ""),
+            "category": category_of(app, cfg),
+            "categoryLabel": category_label(cfg, category_of(app, cfg)),
+        })
+    if "--json" in args or not sys.stdout.isatty():
+        print(json.dumps(out, ensure_ascii=False))
+    else:
+        print(f"Browser: {browser_label(resolved)}"
+              + ("" if out["browser"] == "auto" else f" (chosen: {browser_label(out['browser'])})"))
+        for app in out["apps"]:
+            print(f"  {app['shortcut']:<18} {app['name']:<20} {app['url']}")
+        if not out["apps"]:
+            print("  (no web apps)")
+    return 0
+
+
+def cmd_add(args) -> int:
+    name = url = icon = key = category = ""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("--name", "-n") and i + 1 < len(args):
+            name, i = args[i + 1], i + 2
+        elif a in ("--url", "-u") and i + 1 < len(args):
+            url, i = args[i + 1], i + 2
+        elif a in ("--icon", "-i") and i + 1 < len(args):
+            icon, i = args[i + 1], i + 2
+        elif a in ("--key", "-k") and i + 1 < len(args):
+            key, i = args[i + 1], i + 2
+        elif a in ("--category", "-c") and i + 1 < len(args):
+            category, i = args[i + 1], i + 2
+        else:
+            die(f"unknown option: {a}")
+    name = validate_name(name)
+    url = normalize_url(url)
+
+    cfg = load_config(create=True)
+    category = clean_category(cfg, category)
+    for app in cfg["apps"]:
+        if app.get("name", "").lower() == name.lower() or app.get("url") == url:
+            die(f"{name} already exists")
+
+    slug = unique_slug(cfg, slugify(name))
+    key = (key.strip().upper() if key else pick_key(cfg, name))
+    if key and not re.fullmatch(r"[A-Z0-9]", key):
+        die("the shortcut key must be one letter or digit")
+    app = {"name": name, "slug": slug, "url": url, "key": key, "icon": ""}
+    if category:
+        app["category"] = category
+    app["icon"] = install_icon(app, icon)
+    cfg["apps"].append(app)
+    save_config(cfg)
+    sync(cfg)
+    notify("Web app added", name)
+    print(json.dumps(app, ensure_ascii=False))
+    return 0
+
+
+def cmd_remove(args) -> int:
+    slug = name = ""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("--slug", "-s") and i + 1 < len(args):
+            slug, i = args[i + 1], i + 2
+        elif a in ("--name", "-n") and i + 1 < len(args):
+            name, i = args[i + 1], i + 2
+        elif not a.startswith("-") and not slug and not name:
+            slug, i = a, i + 1
+        else:
+            die(f"unknown option: {a}")
+    if not slug and not name:
+        die("remove needs --slug or --name")
+    cfg = load_config()
+    app = find_app(cfg, slug or name)
+    cfg["apps"] = [a for a in cfg["apps"] if a.get("slug") != app["slug"]]
+    save_config(cfg)
+
+    try:
+        desktop_path(app).unlink()
+    except OSError:
+        pass
+    for f in (ICON_DIR / f"{DESKTOP_PREFIX}{app['slug']}.png",
+              SCALABLE_ICON_DIR / f"{DESKTOP_PREFIX}{app['slug']}.svg",
+              ICON_DIR / f"{DESKTOP_PREFIX}{app['slug']}.webp"):
+        try:
+            f.unlink()
+        except OSError:
+            pass
+    profile = PROFILE_BASE / app["slug"]
+    if PROFILE_BASE in profile.parents and profile.is_dir():
+        shutil.rmtree(profile, ignore_errors=True)
+    sync(cfg)
+    notify("Web app removed", app["name"])
+    print(app["slug"])
+    return 0
+
+
+def cmd_launch(args) -> int:
+    if not args:
+        die("launch needs an app name or slug")
+    cfg = load_config()
+    app = find_app(cfg, args[0])
+    return launch(app, cfg)
+
+
+def cmd_browsers(args) -> int:
+    cfg = load_config()
+    out = {"browser": cfg.get("browser") or "auto",
+           "resolved": resolve_browser(cfg),
+           "browsers": browser_options(cfg)}
+    if "--json" in args or not sys.stdout.isatty():
+        print(json.dumps(out, ensure_ascii=False))
+    else:
+        for b in out["browsers"]:
+            mark = "*" if b["id"] == out["browser"] else " "
+            print(f" {mark} {b['id']:<16} {b['label']}"
+                  + ("" if b["available"] else "  (not installed)"))
+    return 0
+
+
+def cmd_set_browser(args) -> int:
+    if not args:
+        die("set-browser needs a browser id (or auto)")
+    bid = args[0].strip().lower()
+    if bid != "auto" and bid not in BROWSERS:
+        die(f"unknown browser: {bid} (try: auto, {', '.join(BROWSERS)})")
+    cfg = load_config(create=True)
+    cfg["browser"] = bid
+    save_config(cfg)
+    sync(cfg)
+    print(bid)
+    return 0
+
+
+def cmd_seed(args) -> int:
+    browser = ""
+    i = 0
+    while i < len(args):
+        if args[i] == "--browser" and i + 1 < len(args):
+            browser, i = args[i + 1].strip().lower(), i + 2
+        else:
+            die(f"unknown option: {args[i]}")
+    if browser and browser != "auto" and browser not in BROWSERS:
+        die(f"unknown browser: {browser}")
+
+    cfg = load_config()
+    if CONFIG_FILE.is_file():
+        # Never resurrect apps the user removed: only adjust the browser.
+        if browser:
+            cfg["browser"] = browser
+            save_config(cfg)
+            sync(cfg)
+        return 0
+
+    cfg["browser"] = browser or "auto"
+    cfg["apps"] = [dict(a) for a in DEFAULT_APPS]
+    save_config(cfg)
+    sync(cfg)
+    print(f"seeded {len(cfg['apps'])} web apps")
+    return 0
+
+
+def cmd_sync(args) -> int:
+    cfg = load_config()
+    sync(cfg)
+    return 0
+
+
+def cmd_set_category(args) -> int:
+    if len(args) != 2:
+        die("usage: set-category SLUG|NAME CATEGORY  (CATEGORY none: no category)")
+    cfg = load_config()
+    category = clean_category(cfg, args[1])
+    app = find_app(cfg, args[0])
+    if category:
+        app["category"] = category
+    else:
+        app.pop("category", None)
+    save_config(cfg)
+    sync(cfg)
+    print(json.dumps(app, ensure_ascii=False))
+    return 0
+
+
+def cmd_categories(args) -> int:
+    cfg = load_config()
+    cats = [dict(c, count=sum(1 for a in cfg.get("apps", []) if category_of(a, cfg) == c["id"]))
+            for c in categories(cfg)]
+    if "--json" in args or not sys.stdout.isatty():
+        print(json.dumps(cats, ensure_ascii=False))
+    else:
+        for c in cats:
+            print(f"  {c['id']:<16} {c['label']:<24} {c['count']} web apps")
+        if not cats:
+            print("  (no categories)")
+    return 0
+
+
+def cmd_category_add(args) -> int:
+    if len(args) != 1:
+        die("usage: category-add LABEL")
+    label = validate_category_label(args[0])
+    cfg = load_config(create=True)
+    cats = categories(cfg)
+    if any(c["label"].lower() == label.lower() for c in cats):
+        die(f"there is already a category named {label}")
+    base = slugify(label)[:40] or "category"
+    ids = {c["id"] for c in cats}
+    cid, n = base, 2
+    while cid in ids:
+        cid, n = f"{base[:36]}-{n}", n + 1
+    cats.append({"id": cid, "label": label})
+    cfg["categories"] = cats
+    save_config(cfg)
+    print(json.dumps({"id": cid, "label": label}, ensure_ascii=False))
+    return 0
+
+
+def find_category(cfg: dict, cid: str) -> dict:
+    for c in categories(cfg):
+        if c["id"] == cid:
+            return c
+    die(f"no category {cid!r}")
+
+
+def cmd_category_rename(args) -> int:
+    if len(args) != 2:
+        die("usage: category-rename ID LABEL")
+    label = validate_category_label(args[1])
+    cfg = load_config()
+    cats = categories(cfg)
+    find_category(cfg, args[0])
+    if any(c["label"].lower() == label.lower() and c["id"] != args[0] for c in cats):
+        die(f"there is already a category named {label}")
+    for c in cats:
+        if c["id"] == args[0]:
+            c["label"] = label
+    cfg["categories"] = cats
+    save_config(cfg)
+    sync(cfg)                       # its web apps' search keyword
+    print(json.dumps({"id": args[0], "label": label}, ensure_ascii=False))
+    return 0
+
+
+def cmd_category_remove(args) -> int:
+    if len(args) != 1:
+        die("usage: category-remove ID")
+    cfg = load_config()
+    find_category(cfg, args[0])
+    cfg["categories"] = [c for c in categories(cfg) if c["id"] != args[0]]
+    for app in cfg.get("apps", []):
+        if app.get("category") == args[0]:
+            app.pop("category", None)
+    save_config(cfg)
+    sync(cfg)
+    print(json.dumps({"removed": args[0]}))
+    return 0
+
+
+def main(argv) -> int:
+    if len(argv) < 2 or argv[1] in ("-h", "--help", "help"):
+        print(__doc__)
+        return 0 if argv[1:] and argv[1] in ("-h", "--help", "help") else 2
+    cmd, args = argv[1], argv[2:]
+    table = {
+        "list": cmd_list,
+        "add": cmd_add,
+        "remove": cmd_remove,
+        "delete": cmd_remove,
+        "launch": cmd_launch,
+        "open": cmd_launch,
+        "browsers": cmd_browsers,
+        "set-browser": cmd_set_browser,
+        "seed": cmd_seed,
+        "sync": cmd_sync,
+        "set-category": cmd_set_category,
+        "categories": cmd_categories,
+        "category-add": cmd_category_add,
+        "category-rename": cmd_category_rename,
+        "category-remove": cmd_category_remove,
+    }
+    if cmd not in table:
+        die(f"unknown command: {cmd} (see --help)")
+    return table[cmd](args)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv))
+    except KeyboardInterrupt:
+        sys.exit(130)

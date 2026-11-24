@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+# aequalyn-theme -- extract a Material 3 palette from a wallpaper and apply it
+# systemwide (Quickshell, Hyprland, GTK, Qt, terminals, btop, hyprlock).
+#
+# Usage:
+#   aequalyn-theme <image>                     set wallpaper + recolour everything
+#   aequalyn-theme --colors-only <image>       recolour only (wallpaper already set)
+#   aequalyn-theme --refresh                   recolour from the CURRENT wallpaper
+#                                          (never changes the wallpaper)
+#   aequalyn-theme --colors-only --refresh     same, explicit
+#
+# The source of truth for the current wallpaper is
+# ~/.config/quickshell/wallpaper.conf (written by aequalyn-wallpaper / the QML
+# picker). ~/.cache/aequalyn/current-wallpaper is only a fallback.
+set -euo pipefail
+
+CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/aequalyn"
+SETTINGS="$CONF_DIR/aequalyn/settings.json"
+STATE="$CACHE_DIR/current-wallpaper"
+WALLPAPER_CONF="$CONF_DIR/quickshell/wallpaper.conf"
+DEFAULT_WALL="$HOME/Pictures/Wallpapers/beach.jpg"
+
+mkdir -p "$CACHE_DIR" "$CONF_DIR/matugen/templates" "$CONF_DIR/hypr/aequalyn" \
+         "$CONF_DIR/kitty" "$CONF_DIR/foot" \
+         "$CONF_DIR/fuzzel" "$CONF_DIR/qt6ct/colors" "$CONF_DIR/btop/themes" \
+         "$CONF_DIR/gtk-3.0" "$CONF_DIR/gtk-4.0"
+
+log() { printf '\033[0;34m[aequalyn-theme]\033[0m %s\n' "$*" >&2; }
+warn() { printf '\033[1;33m[aequalyn-theme]\033[0m %s\n' "$*" >&2; }
+
+setting() { # setting <key> <default>
+    local key=$1 def=$2 val=""
+    if [[ -f "$SETTINGS" ]] && command -v jq >/dev/null 2>&1; then
+        val=$(jq -r "$key // empty" "$SETTINGS" 2>/dev/null || true)
+    fi
+    printf '%s' "${val:-$def}"
+}
+
+COLORS_ONLY=0
+REFRESH=0
+IMG=""
+for arg in "$@"; do
+    case "$arg" in
+        --colors-only) COLORS_ONLY=1 ;;
+        --refresh)     REFRESH=1; COLORS_ONLY=1 ;;  # refresh never changes the wallpaper
+        -h|--help)     sed -n '2,16p' "$0"; exit 0 ;;
+        -*)            warn "unknown option: $arg" ;;
+        *)             IMG=$arg ;;
+    esac
+done
+
+if [[ $REFRESH -eq 1 || -z "$IMG" ]]; then
+    IMG=$(cat "$WALLPAPER_CONF" 2>/dev/null || true)
+    [[ -z "$IMG" || ! -f "$IMG" ]] && IMG=$(cat "$STATE" 2>/dev/null || true)
+fi
+if [[ -z "$IMG" || ! -f "$IMG" ]]; then
+    IMG="$DEFAULT_WALL"
+fi
+if [[ ! -f "$IMG" ]]; then
+    IMG=$(find "$HOME/Pictures" "$HOME/Pictures/Wallpapers" \
+        -maxdepth 2 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) \
+        2>/dev/null | sort | head -1 || true)
+fi
+if [[ -z "$IMG" || ! -f "$IMG" ]]; then
+    warn "no wallpaper image found"
+    exit 1
+fi
+
+printf '%s' "$IMG" > "$STATE"
+
+# 1. Wallpaper (multi-monitor aware), unless we were asked for colours only.
+if [[ $COLORS_ONLY -eq 0 ]]; then
+    if command -v aequalyn-wallpaper >/dev/null 2>&1; then
+        aequalyn-wallpaper set "$IMG" --no-palette || warn "aequalyn-wallpaper failed (colours still generated)"
+    elif command -v awww >/dev/null 2>&1; then
+        awww img "$IMG" >/dev/null 2>&1 || warn "awww could not set the wallpaper"
+    else
+        warn "awww not installed -- wallpaper left unchanged"
+    fi
+fi
+
+# Live wallpapers: colours come from a still frame of the video.
+WALL_IMG=$IMG
+if [[ "${IMG,,}" =~ \.(mp4|webm|mkv|mov)$ ]]; then
+    IMG=$(aequalyn-wallpaper thumb "$IMG" 2>/dev/null || true)
+    [[ -n "$IMG" && -f "$IMG" ]] || { warn "could not extract a frame from $WALL_IMG (ffmpeg missing?)"; exit 1; }
+fi
+
+# 2. Palette + core templates
+if ! command -v matugen >/dev/null 2>&1; then
+    warn "matugen not installed -- colours left unchanged"
+    exit 1
+fi
+CORE_CONF="$CONF_DIR/matugen/config.toml"
+APPS_CONF="$CONF_DIR/matugen/apps.toml"
+# Light / dark: .palette.mode is dark | light | auto (by the clock); the older
+# .appearance.themeMode == "light" still works.
+MODE=$(setting '.palette.mode' '')
+if [[ -z "$MODE" ]]; then
+    [[ "$(setting '.appearance.themeMode' 'wallpaper')" == "light" ]] && MODE=light || MODE=dark
+fi
+if [[ "$MODE" == "auto" ]]; then
+    hour=$((10#$(date +%H)))
+    if (( hour >= $(setting '.palette.lightFrom' 7) && hour < $(setting '.palette.darkFrom' 19) )); then
+        MODE=light
+    else
+        MODE=dark
+    fi
+fi
+[[ "$MODE" == "light" ]] || MODE=dark
+
+# Material scheme (how colourful the palette is) and contrast.
+SCHEME=$(setting '.palette.scheme' 'scheme-tonal-spot')
+CONTRAST=$(setting '.palette.contrast' '0')
+MATUGEN_ARGS=(-m "$MODE" -t "$SCHEME" --prefer saturation -q)
+[[ "$CONTRAST" != "0" ]] && MATUGEN_ARGS+=(--contrast "$CONTRAST")
+
+log "generating $MODE $SCHEME palette from $(basename "$IMG")"
+if ! matugen image "$IMG" -c "$CORE_CONF" "${MATUGEN_ARGS[@]}"; then
+    # An older matugen without --contrast / this scheme: retry with defaults.
+    warn "matugen rejected scheme/contrast, retrying with defaults"
+    matugen image "$IMG" -c "$CORE_CONF" -m "$MODE" --prefer saturation -q \
+        || { warn "matugen failed on core templates"; exit 1; }
+fi
+
+# Ensure lock screen uses the current wallpaper (blurred), even if template vars differ.
+if [[ -f "$CONF_DIR/hypr/hyprlock.conf" ]]; then
+    tmp_hl=$(mktemp)
+    awk -v p="$IMG" '
+        BEGIN { in_bg=0 }
+        /^[[:space:]]*background[[:space:]]*\{/ { in_bg=1 }
+        in_bg && /^[[:space:]]*path[[:space:]]*=/ { print "    path = " p; next }
+        in_bg && /^[[:space:]]*\}/ { in_bg=0 }
+        { print }
+    ' "$CONF_DIR/hypr/hyprlock.conf" > "$tmp_hl" && mv "$tmp_hl" "$CONF_DIR/hypr/hyprlock.conf"
+fi
+
+# The lock screen design chosen in Settings, over what matugen just wrote (that one is
+# kept as the "classic" design)
+if [[ -f "$CONF_DIR/hypr/hyprlock.conf" ]] && command -v aequalyn-lockscreen >/dev/null 2>&1; then
+    mkdir -p "$CONF_DIR/hypr/lockscreens"
+    cp -f "$CONF_DIR/hypr/hyprlock.conf" "$CONF_DIR/hypr/lockscreens/.classic"
+    aequalyn-lockscreen apply || warn "lock screen design not applied"
+fi
+
+# Nautilus/libadwaita palette (live-reloaded by Aequalyn nautilus-python extension)
+if command -v aequalyn-nautilus-palette >/dev/null 2>&1; then
+    aequalyn-nautilus-palette >/dev/null 2>&1 || true
+elif [[ -x "$HOME/.local/bin/aequalyn-nautilus-palette" ]]; then
+    "$HOME/.local/bin/aequalyn-nautilus-palette" >/dev/null 2>&1 || true
+fi
+
+# Only restart Nautilus when it actually has a window open. A background
+# `nautilus --gapplication-service` process must not get a new window just
+# because the palette changed; the extension reloads the CSS in open windows.
+nautilus_has_window() {
+    if command -v hyprctl >/dev/null 2>&1; then
+        local classes
+        classes=$(hyprctl clients -j 2>/dev/null | jq -r '.[].class // empty' 2>/dev/null || true)
+        printf '%s\n' "$classes" | grep -qi nautilus && return 0
+        return 1
+    fi
+    pgrep -x nautilus >/dev/null 2>&1
+}
+if command -v nautilus >/dev/null 2>&1 && nautilus_has_window; then
+    nautilus -q >/dev/null 2>&1 || true
+    sleep 0.4
+    nautilus >/dev/null 2>&1 &
+    disown >/dev/null 2>&1 || true
+fi
+
+# 3. Third-party app templates (GTK), gated by the settings toggle
+if [[ "$(setting '.appearance.themeApps' 'true')" == "true" && -f "$APPS_CONF" ]]; then
+    matugen image "$IMG" -c "$APPS_CONF" "${MATUGEN_ARGS[@]}" \
+        || warn "matugen failed on app templates"
+fi
+
+# 4. Browser policy (opt-in), using the accent just generated. The helper is a
+# no-op while "Browsers use these colours too" is off.
+if command -v aequalyn-browser-theme >/dev/null 2>&1; then
+    aequalyn-browser-theme sync >/dev/null 2>&1 || true
+fi
+
+log "done"

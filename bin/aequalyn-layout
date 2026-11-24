@@ -1,411 +1,208 @@
 #!/usr/bin/env bash
-
 # aequalyn-layout -- window layouts per workspace.
-
 #
-
 # Usage:
-
 #   aequalyn-layout list [--json]              every layout (38: 33 Aequalyn + 5 Hyprland, including Floating)
-
 #   aequalyn-layout current [--workspace N]    the layout of a workspace
-
 #   aequalyn-layout set <layout> [--workspace N]
-
 #   aequalyn-layout next | prev [--workspace N]   step through the Super + L cycle
-
 #   aequalyn-layout cycle [layout ...]         print or set the layouts Super + L goes through
-
 #   aequalyn-layout option pane|middle|gap|step|notify|outline|others|flash <value>
-
 #       step: how much one press of Super + - / = changes the main pane (0.0025 .. 0.05)
-
 #       notify: true | false, a notification with the layout's name when it changes
-
 #       outline: theme | 0 .. 10, the border (px) of windows on Aequalyn's layouts
-
 #       others: theme | same | hidden, what the windows you're not using wear
-
 #       flash: true | false, both windows of a swap light up for a moment
-
 #   aequalyn-layout status                     JSON: workspaces, cycle, options
-
 #   aequalyn-layout apply                      rewrite workspace-layouts.lua and reload
-
 #
-
 # <layout> is a key (portrait, mosaic, dwindle ...), a name ("Diptych Left")
-
 # or a full id (lua:aq-portrait). Without --workspace the focused one is used.
-
 #
-
 # Choices live in settings.json (.layouts) and are written to
-
 # ~/.config/hypr/aequalyn/workspace-layouts.lua, which hyprland.lua loads,
-
 # so every workspace keeps its layout across reloads, logouts and reboots.
-
 set -uo pipefail
 
-
-
 CONF="${XDG_CONFIG_HOME:-$HOME/.config}"
-
 SETTINGS="$CONF/aequalyn/settings.json"
-
 CATALOGUE="$CONF/aequalyn/layouts.json"
-
 RULES="$CONF/hypr/aequalyn/workspace-layouts.lua"
 
-
-
 die() { printf 'aequalyn-layout: %s\n' "$*" >&2; exit 1; }
-
 command -v jq >/dev/null 2>&1 || die "jq is required"
-
 [[ -f "$CATALOGUE" ]] || die "missing $CATALOGUE (reinstall aequalyn)"
-
-
 
 setting() { [[ -f "$SETTINGS" ]] && jq -r "$1 // empty" "$SETTINGS" 2>/dev/null || true; }
 
-
-
 focused_ws() {
-
     hyprctl activeworkspace -j 2>/dev/null | jq -r '.id // empty' 2>/dev/null
-
 }
-
-
 
 # resolve <text> -> full layout id, or nothing
-
 resolve() {
-
     jq -r --arg q "$1" '
-
         ($q | ascii_downcase | gsub("[ _-]"; "")) as $k
-
         | map(select(.id == $q or (.key | gsub("[ _-]"; "")) == $k or (.name | ascii_downcase | gsub("[ _-]"; "")) == $k))
-
         | .[0].id // empty' "$CATALOGUE"
-
 }
-
-
 
 name_of() { jq -r --arg id "$1" 'map(select(.id == $id))[0].name // $id' "$CATALOGUE"; }
 
-
-
 layout_of() { # layout_of <ws>
-
     local l
-
     l=$(setting ".layouts.workspaces[\"$1\"]")
-
     [[ -n "$l" ]] || l=$(setting ".layouts.default")
-
     printf '%s' "${l:-dwindle}"
-
 }
-
-
 
 cycle_list() {
-
     local c
-
-    c=$(setting '.layouts.cycle | if type == "array" and length > 1 then .[] else empty end')    if [[ -n "$c" ]]; then printf '%s\n' "$c"; else jq -r '.[].id' "$CATALOGUE"; fi
-
+    c=$(setting '.layouts.cycle | if type == "array" and length > 0 then .[] else empty end')
+    if [[ -n "$c" ]]; then printf '%s\n' "$c"; else jq -r '.[].id' "$CATALOGUE"; fi
 }
-
-
 
 lua_str() { printf '"%s"' "$(printf '%s' "$1" | sed 's/[\\"]/\\&/g')"; }
-
 lua_num() { [[ "$1" =~ ^[0-9]+([.][0-9]+)?$ ]] && printf '%s' "$1" || printf '%s' "$2"; }
 
-
-
 # Write workspace-layouts.lua from settings.json.
-
 write_rules() {
-
     mkdir -p "$(dirname "$RULES")"
-
     local pane middle gap step outline others flash def tmp
-
     pane=$(lua_num "$(setting .layouts.pane)" 0.62)
-
     middle=$(lua_num "$(setting .layouts.middle)" 0.56)
-
     gap=$(lua_num "$(setting .layouts.gap)" 24)
-
     step=$(lua_num "$(setting .layouts.step)" 0.01)
-
     # outline: a number, or nothing for "as the theme"; others: one of three words
-
     outline=$(setting .layouts.outline); [[ "$outline" =~ ^([0-9]|10)$ ]] || outline=""
-
     others=$(setting .layouts.others); [[ "$others" =~ ^(same|hidden)$ ]] || others=theme
-
     flash=true; [[ -f "$SETTINGS" && "$(jq -r '.layouts.flash' "$SETTINGS" 2>/dev/null)" == false ]] && flash=false
-
     def=$(setting .layouts.default)
-
     tmp=$(mktemp "$RULES.XXXXXX")
-
     {
-
         printf -- '-- Written by aequalyn-layout from settings.json (.layouts). Do not edit.\n'
-
         printf 'local L = _G.aequalyn_layouts\n'
-
         printf 'if L then L.configure({ pane = %s, middle = %s, gap = %s, step = %s, others = %s, flash = %s%s }) end\n' \
-
             "$pane" "$middle" "$gap" "$step" "$(lua_str "$others")" "$flash" "${outline:+, outline = $outline}"
-
         if [[ "$def" == "floating" ]]; then
-
             # "floating" is a way of arranging a workspace, not a Hyprland
-
             # layout name: keep the compositor's underlying layout untouched.
-
             printf 'if _G.aequalyn_floating then _G.aequalyn_floating.set_default(true) end\n'
-
         elif [[ -n "$def" ]]; then
-
             printf 'hl.config({ general = { layout = %s } })\n' "$(lua_str "$def")"
-
         fi
-
         if [[ -f "$SETTINGS" ]]; then
-
             jq -r '.layouts.workspaces // {} | to_entries[] | "\(.key)\t\(.value)"' "$SETTINGS" 2>/dev/null \
-
             | while IFS=$'\t' read -r ws layout; do
-
                 [[ "$ws" =~ ^[0-9A-Za-z:_-]+$ ]] || continue
-
                 [[ -n "$(jq -r --arg id "$layout" 'map(select(.id == $id))[0].id // empty' "$CATALOGUE")" ]] || continue
-
                 if [[ "$layout" == "floating" ]]; then
-
                     printf 'if _G.aequalyn_floating then _G.aequalyn_floating.set_ws(%s, true) end\n' "$(lua_str "$ws")"
-
                 else
-
                     printf 'hl.workspace_rule({ workspace = %s, layout = %s })\n' "$(lua_str "$ws")" "$(lua_str "$layout")"
-
                     # With Floating as the default, an ordinary workspace must
-
                     # opt out explicitly; otherwise its windows float too.
-
                     if [[ "$def" == "floating" ]]; then
-
                         printf 'if _G.aequalyn_floating then _G.aequalyn_floating.set_ws(%s, false) end\n' "$(lua_str "$ws")"
-
                     fi
-
                 fi
-
             done
-
         fi
-
     } > "$tmp"
-
     mv "$tmp" "$RULES"
-
 }
-
-
 
 reload() {
-
     command -v hyprctl >/dev/null 2>&1 || return 0
-
     hyprctl reload >/dev/null 2>&1 || true
-
 }
-
-
 
 announce() { # announce <layout-id> <ws>
-
     # read directly: setting() uses jq's `//`, which treats false as missing
-
     [[ -f "$SETTINGS" && "$(jq -r '.layouts.notify' "$SETTINGS" 2>/dev/null)" == "false" ]] && return 0
-
     command -v notify-send >/dev/null 2>&1 || return 0
-
     notify-send -a Aequalyn -h string:x-canonical-private-synchronous:aequalyn-layout \
-
         -t 1400 "$(name_of "$1")" "Workspace $2" >/dev/null 2>&1 || true
-
 }
-
-
 
 ws_arg() { # parse --workspace N from the remaining args, default focused
-
     local ws=""
-
     while [[ $# -gt 0 ]]; do
-
         case "$1" in --workspace|-w) ws=${2:-}; shift ;; esac
-
         shift
-
     done
-
     [[ -n "$ws" ]] || ws=$(focused_ws)
-
     [[ -n "$ws" ]] || die "no workspace (is Hyprland running? use --workspace N)"
-
     printf '%s' "$ws"
-
 }
-
-
 
 set_layout() { # set_layout <id> <ws>
-
     aequalyn-settings set ".layouts.workspaces[\"$2\"]" "$(jq -n --arg v "$1" '$v')" >/dev/null \
-
         || die "could not save the choice"
-
     write_rules
-
     reload
-
     announce "$1" "$2"
-
 }
 
-
-
 cmd=${1:-}
-
 [[ $# -gt 0 ]] && shift
-
 case "$cmd" in
-
     list)
-
         if [[ "${1:-}" == "--json" ]]; then jq -c . "$CATALOGUE"
-
         else jq -r '.[] | "\(.key)|\(.group)|\(.name)"' "$CATALOGUE" | awk -F'|' '{ printf "%-16s %-9s %s\n", $1, $2, $3 }'; fi ;;
-
     current)
-
         ws=$(ws_arg "$@"); layout_of "$ws"; echo ;;
-
     set)
-
         [[ $# -ge 1 ]] || die "usage: set <layout> [--workspace N]"
-
         id=$(resolve "$1"); [[ -n "$id" ]] || die "unknown layout: $1 (see: aequalyn-layout list)"
-
         shift
-
         ws=$(ws_arg "$@")
-
         set_layout "$id" "$ws" ;;
-
     next|prev)
-
         ws=$(ws_arg "$@")
-
         cur=$(layout_of "$ws")
-
         mapfile -t cyc < <(cycle_list)
-
         n=${#cyc[@]}; idx=-1
-
         for i in "${!cyc[@]}"; do [[ "${cyc[$i]}" == "$cur" ]] && idx=$i; done
-
         if [[ "$cmd" == next ]]; then to=$(( (idx + 1) % n )); else to=$(( idx < 0 ? n - 1 : (idx - 1 + n) % n )); fi
-
         set_layout "${cyc[$to]}" "$ws" ;;
-
     cycle)
-
         if [[ $# -eq 0 ]]; then cycle_list; exit 0; fi
-
         ids=()
-
         for a in "$@"; do id=$(resolve "$a"); [[ -n "$id" ]] || die "unknown layout: $a"; ids+=("$id"); done
-
-        [[ ${#ids[@]} -ge 2 ]] || die "the cycle needs at least two layouts"        aequalyn-settings set .layouts.cycle "$(printf '%s\n' "${ids[@]}" | jq -R . | jq -s -c .)" >/dev/null ;;
-
+        [[ ${#ids[@]} -ge 1 ]] || die "the cycle needs at least one layout"
+        aequalyn-settings set .layouts.cycle "$(printf '%s\n' "${ids[@]}" | jq -R . | jq -s -c .)" >/dev/null ;;
     option)
-
         [[ $# -eq 2 ]] || die "usage: option pane|middle|gap|step|notify|outline|others|flash <value>"
-
         case "$1" in
-
             pane|middle) awk -v v="$2" 'BEGIN { exit !(v >= 0.3 && v <= 0.85) }' || die "$1 must be 0.30 .. 0.85" ;;
-
             gap) [[ "$2" =~ ^[0-9]+$ && "$2" -le 120 ]] || die "gap must be 0 .. 120" ;;
-
             step) [[ "$2" =~ ^[0-9]*[.]?[0-9]+$ ]] && awk -v v="$2" 'BEGIN { exit !(v >= 0.0025 && v <= 0.05) }' \
-
                       || die "step must be 0.0025 .. 0.05" ;;
-
             notify) [[ "$2" == true || "$2" == false ]] || die "notify must be true or false"
-
                     aequalyn-settings set .layouts.notify "$2" >/dev/null; exit 0 ;;
-
             outline) if [[ "$2" == theme ]]; then aequalyn-settings del .layouts.outline >/dev/null; write_rules; reload; exit 0; fi
-
                      [[ "$2" =~ ^([0-9]|10)$ ]] || die "outline must be theme or 0 .. 10" ;;
-
             flash) [[ "$2" == true || "$2" == false ]] || die "flash must be true or false"
-
                    aequalyn-settings set .layouts.flash "$2" >/dev/null; write_rules; reload; exit 0 ;;
-
             others) [[ "$2" =~ ^(theme|same|hidden)$ ]] || die "others must be theme, same or hidden"
-
                     aequalyn-settings set .layouts.others "$(jq -n --arg v "$2" '$v')" >/dev/null; write_rules; reload; exit 0 ;;
-
             *) die "unknown option: $1" ;;
-
         esac
-
         aequalyn-settings set ".layouts.$1" "$2" >/dev/null
-
         write_rules; reload ;;
-
     status)
-
         jq -n -c --arg focused "$(focused_ws)" \
-
             --argjson s "$( [[ -f "$SETTINGS" ]] && jq -c '.layouts // {}' "$SETTINGS" || echo '{}')" \
-
             --argjson cycle "$(cycle_list | jq -R . | jq -s -c .)" \
-
             '{focused: $focused, workspaces: ($s.workspaces // {}), default: ($s.default // "dwindle"),
-
               cycle: $cycle, pane: ($s.pane // 0.62), middle: ($s.middle // 0.56), gap: ($s.gap // 24),
-
               step: ($s.step // 0.01), notify: ($s.notify != false),
-
               outline: ($s.outline // "theme"), others: ($s.others // "theme"), flash: ($s.flash != false)}' ;;
-
     apply)
-
         write_rules; reload ;;
-
     -h|--help|"")
-
         sed -n '2,20p' "$0" ;;
-
     *)
-
         die "unknown command: $cmd" ;;
-
 esac

@@ -1,3909 +1,1966 @@
 #!/usr/bin/env python3
-
 # aequalyn:summary=The Store's engine: check, install, update and remove plugins, themes, cursors, wallpaper packs and looks, and bring AppImages in
-
 """aequalyn-store -- what the Store runs. Every install goes through the same checks first.
 
-
-
   aequalyn-store check   <kind> <git-url|dir> [--at <commit>] [--market]
-
   aequalyn-store install <kind> <git-url|dir> [--at <commit>] [--enable]
-
   aequalyn-store update  <kind> <id>
-
   aequalyn-store remove  <kind> <id>
-
   aequalyn-store list    [<kind>] [--json]
-
   aequalyn-store update-all
-
   aequalyn-store refresh                  fetch the Market's catalog (checked against its sha256)
-
   aequalyn-store market [--json]          the catalog, each item with its state here
-
   aequalyn-store install-market <id>      install a catalog item at the commit (an AppImage:
-
                                           at the sha256 of the exact file) it was approved at
-
   aequalyn-store search-apps [<words>] [--page <n>]
-
                                           apps from Arch, the AUR, Flathub and Snap, as JSON
-
                                           (no words: Flathub's most installed, page by page,
-
                                           and Snap's featured)
-
   aequalyn-store app-info <name> [--arch ID] [--aur ID] [--flatpak ID] [--snap ID]
-
                                           one app's page: every source, version and detail,
-
-                                          fetched from the package managers, as JSON  aequalyn-store apply-look <id> [--piece all|bar|dock|cursor|lock|sleep|sddm]
-
+                                          fetched from the package managers, as JSON; sources
+                                          with no id are resolved by name first
+  aequalyn-store apply-look <id> [--piece all|bar|dock|cursor|lock|sleep|sddm]
   aequalyn-store check-appimage <file>     a real AppImage? its name and icon, read without running it
-
   aequalyn-store import-appimage <file>    move it to ~/Applications, give it a menu entry
-
   aequalyn-store open-appimage <file>      the desktop's handler: run it, or bring it to the Store
-
   aequalyn-store set-appimage-handler      make the Store the default .AppImage opener
 
-
-
   kinds: plugin, theme, cursor, wallpaper, look
-
   (the plan's spellings work too: install-plugin <src>, list-themes --json, ...)
 
-
-
 A source is a git URL (cloned with --depth 1, or at --at <commit>) or a local folder.
-
 Nothing is installed unless every check passes; the report says what failed and why.
-
 --market also asks for what a Market submission must carry (README.md, Preview.qml...).
 
-
-
 An AppImage is one file: import-appimage checks its magic, then reads its name, comment
-
 and icon straight out of the embedded filesystem -- squashfs via unsquashfs, an ISO
-
 with Rock Ridge and zisofs (type 1) via bsdtar, dwarfs via dwarfsextract (the AUR
-
 package; appdwarf and Ghostty pack with it), erofs via fsck.erofs (erofs-utils) --
-
 nothing inside it is ever run. The .desktop is read from the root (a symlink followed,
-
 electron-builder's way) or from usr/share/applications, then the AppStream metainfo
-
 fills what it says too little of. Its icon is looked for in every place one is kept:
-
 .DirIcon, the one Icon= names (matched with or without case, extension or path), the
-
 theme directories by size, the pixmaps, the root, a gzipped svgz decompressed on the
-
 way. And whatever the packing, an icon always lands in the apps menu: none found
-
 means a small badge with the app's initial is written instead. It then moves to
-
 ~/Applications, writes a menu entry into ~/.local/share/applications and remembers
-
 it. `remove appimage <id>` takes one back out of the launcher, its menu entry and
-
 its record gone -- the AppImage itself, the user's own file, is kept where it is,
-
 never deleted.
-
 set-appimage-handler is the freedesktop MIME way, no root: the three AppImage MIME
-
 types in ~/.local/share/mime/packages, a handler entry with MimeType= and Exec=%f, the
-
 databases refreshed, and xdg-mime asked to make it the default. From then on an
-
 .AppImage opened in a file manager calls open-appimage: one already imported runs, a
-
 new one arrives at the Store's AppImages page.
 
-
-
 A look is a set of visual settings, one piece or several: the bar's look, the docks'
-
 look, a cursor look (Plume), a lock screen design, the lock and sleep timings, and an
-
 SDDM login theme. Install keeps it; apply-look wears it, all of it or one piece.
-
 """
-
 import hashlib, json, os, pwd, re, shutil, subprocess, sys, tempfile
-
 from pathlib import Path
 
-
-
 HOME = Path.home()
-
 CONF = Path(os.environ.get("XDG_CONFIG_HOME", HOME / ".config"))
-
 DATA = Path(os.environ.get("XDG_DATA_HOME", HOME / ".local/share"))
-
 STATE = Path(os.environ.get("XDG_STATE_HOME", HOME / ".local/state")) / "aequalyn-store"
-
 APPS_DIR = HOME / "Applications"             # where AppImages live, AppImageLauncher's way
-
 APPIMAGE_ICONS = DATA / "aequalyn/appimages"  # their icons, pulled out of the file
-
 ROOTS = {
-
     "plugin": DATA / "aequalyn/plugins",
-
     "theme": CONF / "aequalyn/themes",
-
     "cursor": DATA / "icons",
-
     "wallpaper": DATA / "aequalyn/wallpapers",
-
     "look": DATA / "aequalyn/looks",
-
     "appimage": APPS_DIR,
-
 }
-
 KINDS = list(ROOTS)
-
 SHELL = CONF / "quickshell"
-
 SETTINGS = CONF / "aequalyn/settings.json"
-
 MARKET_URL = os.environ.get("AEQUALYN_MARKET_URL",
-
                             "https://raw.githubusercontent.com/Aequalyn/aequalyn-market/main/db/market.json")
-
 ID_RE = re.compile(r"^[a-z][a-z0-9-]{1,39}$")
-
 PALETTE = ["bgBase", "bgSurface", "bgHover", "bgSelected", "bgBorder", "textPrimary", "textSecondary",
-
            "textMuted", "accentPrimary", "accentCyan", "accentGreen", "accentOrange", "accentRed"]
-
 HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
-
 # the programs a plugin may start
-
 ALLOWED_PROGRAMS = {"qs", "hyprctl", "gsettings", "notify-send", "wl-copy", "wl-paste", "xdg-open",
-
                     "brightnessctl", "wpctl", "pactl", "playerctl", "nmcli", "bluetoothctl",
-
                     "aequalyn-watchdog"}
-
 BANNED = [
-
     (r"\bXMLHttpRequest\b", "requests to the network"),
-
     (r"\b(eval|Function)\s*\(", "code built from strings (eval)"),
-
     (r"(source|url|import)\s*[:=]?\s*\"https?://", "code or files loaded from a remote URL"),
-
     (r"\bsudo\b|\bpkexec\b|\bdoas\b", "asking for root"),
-
     (r"\|\s*(ba|z|da)?sh\b", "a pipe into a shell"),
-
     (r"\b(curl|wget)\b", "downloads"),
-
     (r"\.bashrc|\.zshrc|\.profile|autostart", "edits to shell start-up files or autostart"),
-
     (r"[A-Za-z0-9+/=]{200,}", "a long base64 blob"),
-
     (r"(\\x[0-9a-fA-F]{2}){20,}", "a long hex blob"),
-
 ]
-
 IMAGE_MAGIC = [b"\x89PNG", b"\xff\xd8\xff", b"RIFF", b"GIF8"]
-
 VIDEO_EXT = {".mp4", ".webm", ".mkv", ".mov"}
-
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
-
 MAX_ICON = 1 << 20          # 1 MiB
-
 MAX_MEDIA = 200 << 20       # 200 MiB a file
 
 
-
-
-
 class Fail(Exception):
-
     pass
 
 
-
-
-
 def say(msg):
-
     print(msg, flush=True)
 
 
-
-
-
 def step(msg):
-
     say(f"==> {msg}")
 
 
-
-
-
 def run(cmd, **kw):
-
     return subprocess.run(cmd, capture_output=True, text=True, **kw)
 
 
-
-
-
 def qs_ipc(*args):
-
     if shutil.which("qs"):
-
         r = run(["qs", "ipc", "call", *args])
-
         return r.stdout.strip() if r.returncode == 0 else None
-
     return None
 
 
-
-
-
 # ---- sources ---------------------------------------------------------------------------
-
 def fetch(src, at, tmp):
-
     """the source in a temp folder: (path, commit or "")"""
-
     if os.path.isdir(src):
-
         dst = Path(tmp) / "src"
-
         shutil.copytree(src, dst, symlinks=True, ignore=shutil.ignore_patterns(".git"))
-
         commit = ""
-
         if (Path(src) / ".git").exists():
-
             commit = run(["git", "-C", src, "rev-parse", "HEAD"]).stdout.strip()
-
         return dst, commit
-
     if not re.match(r"^https://[\w.-]+/[\w./-]+$", src):
-
         raise Fail(f"not a folder, nor an https git URL: {src}")
-
     dst = Path(tmp) / "src"
-
     step(f"Cloning {src}" + (f" at {at}" if at else ""))
-
     if at:
-
         if not re.match(r"^[0-9a-f]{7,40}$", at):
-
             raise Fail(f"not a commit id: {at}")
-
         os.makedirs(dst)
-
         for c in (["git", "init", "-q"], ["git", "remote", "add", "origin", src],
-
                   ["git", "fetch", "-q", "--depth", "1", "origin", at], ["git", "checkout", "-q", "FETCH_HEAD"]):
-
             r = run(c, cwd=dst)
-
             if r.returncode:
-
                 raise Fail(f"git: {r.stderr.strip() or ' '.join(c)}")
-
     else:
-
         r = run(["git", "clone", "-q", "--depth", "1", src, str(dst)])
-
         if r.returncode:
-
             raise Fail(f"git clone failed: {r.stderr.strip()}")
-
     commit = run(["git", "-C", str(dst), "rev-parse", "HEAD"]).stdout.strip()
-
     shutil.rmtree(dst / ".git", ignore_errors=True)
-
     return dst, commit
 
 
-
-
-
 def default_id(src, prefix):
-
     name = Path(src.rstrip("/")).name
-
     name = re.sub(r"\.git$", "", name).lower()
-
     for p in (f"aequalyn-{prefix}-", "aequalyn-"):
-
         if name.startswith(p):
-
             name = name[len(p):]
-
     return re.sub(r"[^a-z0-9-]", "-", name).strip("-")
 
 
-
-
-
 # ---- shared checks ---------------------------------------------------------------------
-
 def no_escapes(root):
-
     """no symlinks leaving the folder, no executables outside allowed places"""
-
     for p in root.rglob("*"):
-
         if p.is_symlink():
-
             t = (p.parent / os.readlink(p)).resolve()
-
             if not str(t).startswith(str(root.resolve())):
-
                 raise Fail(f"{p.relative_to(root)} links outside the folder")
 
 
-
-
-
 def json_file(path, what):
-
     try:
-
         return json.loads(path.read_text())
-
     except FileNotFoundError:
-
         raise Fail(f"{what} is missing")
-
     except Exception as e:
-
         raise Fail(f"{what} does not parse: {e}")
 
 
-
-
-
 def real_image(path, cap):
-
     if not path.is_file():
-
         raise Fail(f"{path.name} is missing")
-
     if path.stat().st_size > cap:
-
         raise Fail(f"{path.name} is larger than {cap >> 20} MiB")
-
     head = path.read_bytes()[:12]
-
     if path.suffix.lower() in VIDEO_EXT:
-
         if b"ftyp" not in head and not head.startswith(b"\x1a\x45\xdf\xa3"):
-
             raise Fail(f"{path.name} is not a real video")
-
         return
-
     if not any(head.startswith(m) for m in IMAGE_MAGIC):
-
         raise Fail(f"{path.name} is not a real image")
 
 
-
-
-
 def qmllint(files, root):
-
     tool = shutil.which("qmllint") or "/usr/lib/qt6/bin/qmllint"
-
     if not os.path.exists(tool):
-
         say("   (qmllint not found: install qt6-declarative to lint)")
-
         return
-
     step(f"qmllint over {len(files)} QML files")
-
     errors = []
-
     for f in files:
-
         out = run([tool, "--bare", str(f)])
-
         for line in (out.stdout + out.stderr).splitlines():
-
             if line.startswith("Error") or "error:" in line.lower() and "import" not in line.lower():
-
                 errors.append(line.replace(str(root) + "/", ""))
-
             elif line.startswith("Warning") and "Unknown import syntax" not in line:
-
                 say("   " + line.replace(str(root) + "/", ""))
-
     if errors:
-
         raise Fail("qmllint found errors:\n   " + "\n   ".join(errors))
 
 
-
-
-
 def scan_code(files, root, ident):
-
     step("Looking for what a plugin must not do")
-
     problems = []
-
     for f in files:
-
         text = f.read_text(errors="replace")
-
         rel = f.relative_to(root)
-
         for pat, why in BANNED:
-
             if re.search(pat, text):
-
                 problems.append(f"{rel}: {why}")
-
         for m in re.finditer(r"command\s*:\s*\[\s*\"([^\"]+)\"", text):
-
             prog = os.path.basename(m.group(1))
-
             if prog not in ALLOWED_PROGRAMS:
-
                 problems.append(f"{rel}: runs '{prog}', which is not on the allowed list")
-
         for m in re.finditer(r"IpcHandler\s*\{[^}]*?target\s*:\s*\"([^\"]*)\"", text, re.S):
-
             if m.group(1) != ident:
-
                 problems.append(f"{rel}: an IpcHandler named '{m.group(1)}' (it must be '{ident}')")
-
     if problems:
-
         raise Fail("not allowed:\n   " + "\n   ".join(sorted(set(problems))))
 
 
-
-
-
 def builtin_ids():
-
     p = SHELL / "Plugins.js"
-
     return set(re.findall(r"id:\s*\"([^\"]+)\"", p.read_text())) if p.exists() else set()
 
 
-
-
-
 # ---- the root gate's package halves ------------------------------------------
-
 # The Store's pacman rides the same gate as every plugin's root action: the
-
 # page stages what to do in the user's gate dir and calls
-
 # aequalyn-watchdog exec-root; the approval window decides; and THIS runs,
-
 # as root, with nothing from the user side trusted beyond strict validation.
-
-
 
 PKG_NAME_RE = re.compile(r"^[A-Za-z0-9@._+-]{1,128}$")
 
 
-
-
-
 def do_gate_pkg():
-
     if os.geteuid() != 0:
-
         raise Fail("gate-pkg needs root: the gate runs it, never a person")
-
     user = os.environ.get("SUDO_USER", "")
-
     if not user:
-
         raise Fail("no SUDO_USER: not started by the gate")
-
     try:
-
         home = Path(pwd.getpwnam(user).pw_dir)
-
     except KeyError:
-
         raise Fail(f"no home for {user}")
-
     stage = home / ".local" / "state" / "aequalyn" / "gate" / "pkg.json"
-
     try:
-
         d = json.loads(stage.read_text())
-
     except (OSError, ValueError) as e:
-
         raise Fail(f"the staged request is unreadable: {e}")
-
     op, names = d.get("op", ""), d.get("packages", [])
-
     if op not in ("install", "remove") or not isinstance(names, list) \
-
             or not (1 <= len(names) <= 32):
-
         raise Fail("the staged request is invalid")
-
     for n in names:
-
         if not PKG_NAME_RE.match(str(n)):
-
             raise Fail(f"not a plain package name: {n}")
-
     argv = (["pacman", "-S", "--needed", "--noconfirm"] if op == "install"
-
             else ["pacman", "-Rns", "--noconfirm"]) + [str(n) for n in names]
-
     step(("Installing " if op == "install" else "Removing ") + ", ".join(names))
-
     r = subprocess.run(argv, capture_output=True, text=True)
-
     if r.stdout.strip():
-
         say(r.stdout.rstrip())
-
     if r.stderr.strip():
-
         say(r.stderr.rstrip())
-
     if r.returncode != 0:
-
         raise Fail(f"pacman exited {r.returncode}")
 
 
-
-
-
 ROOT_ACTION_ID_RE = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
-
 ROOT_LAUNCHERS = {"sudo", "pkexec", "su", "doas"}
 
 
-
-
-
 def clean_root_actions(raw, where):
-
     """Validate a manifest's needsRoot the same way aequalyn-watchdog does
-
     (it checks again before anything runs). A broken or sneaky action is
-
     dropped; the command must be a fixed argv, never a shell, never sudo
-
     itself (the gate adds sudo)."""
-
     out = []
-
     if not isinstance(raw, list):
-
         return out
-
     for a in raw[:8]:
-
         if not isinstance(a, dict):
-
             continue
-
         aid, cmd = a.get("id", ""), a.get("command", [])
-
         if not ROOT_ACTION_ID_RE.match(str(aid)) or not isinstance(cmd, list) or not (1 <= len(cmd) <= 64):
-
             continue
-
         argv = []
-
         for x in cmd:
-
             s = str(x)
-
             if not s or len(s) > 512 or "\x00" in s or "\n" in s:
-
                 argv = []
-
                 break
-
             argv.append(s)
-
         if not argv or os.path.basename(argv[0]) in ROOT_LAUNCHERS:
-
             continue
-
         if any(x["id"] == aid for x in out):
-
             continue
-
         out.append({"id": str(aid), "label": str(a.get("label", aid))[:128], "command": argv})
-
     return out
 
 
-
-
-
 # ---- per kind: check returns (id, meta) -------------------------------------------------
-
 def check_plugin(root, src, market):
-
     step("Checking the main files")
-
     man = json_file(root / "plugin.json", "plugin.json")
-
     for k in ("id", "label", "entry", "icon", "group", "keys", "about", "version", "repo"):
-
         if k not in man:
-
             raise Fail(f"plugin.json has no '{k}'")
-
     ident = man["id"]
-
     if not ID_RE.match(ident):
-
         raise Fail(f"plugin.json: id '{ident}' must be short, lowercase letters, digits and dashes")
-
     if ident in builtin_ids():
-
         raise Fail(f"'{ident}' is a built-in plugin's id")
-
     if man["group"] not in ("screen", "key", "background"):
-
         raise Fail("plugin.json: group must be screen, key or background")
-
     entry = root / man["entry"]
-
     if not entry.is_file() or entry.suffix != ".qml" or "/" in man["entry"]:
-
         raise Fail(f"the entry {man['entry']} is missing (a .qml file beside plugin.json)")
-
     body = re.sub(r"(?m)^\s*(import|pragma|//).*$", "", entry.read_text())
-
     if re.match(r"\s*ShellRoot\b", body):
-
         raise Fail("the entry is a ShellRoot: it must be an Item")
-
     qml = sorted(root.rglob("*.qml"))
-
     for f in qml:
-
         if "pragma Singleton" in f.read_text() and not (f.parent / "qmldir").is_file():
-
             raise Fail(f"{f.parent.relative_to(root) or '.'} has a singleton but no qmldir")
-
     if market:
-
         for need in ("Preview.qml", "README.md"):
-
             if not (root / need).is_file():
-
                 raise Fail(f"{need} is missing (the Market shows it on your item's page)")
-
     no_escapes(root)
-
     scan_code(qml, root, ident)
-
     qmllint(qml, root)
-
     # what it wants root for, checked and said out loud BEFORE anything is
-
     # installed: the actions must be declared here (the command pinned in
-
     # the manifest), because the watchdog's gate runs nothing else -- a
-
     # plugin cannot pass a command in, ever. aequalyn-watchdog validates
-
     # the same shape again before it ever runs one.
-
     acts = clean_root_actions(man.get("needsRoot"), "plugin.json")
-
     if acts:
-
         say("")
-
         step(f"This plugin asks for root: {len(acts)} action{'s' if len(acts) > 1 else ''}")
-
         for a in acts:
-
             say(f"   {a['label']}  \u2014  {' '.join(a['command'])}")
-
         say("   Nothing runs as root until you approve it in the window that opens,")
-
         say("   and the commands above are the only ones it can ever be.")
-
     return ident, {"label": man["label"], "version": man["version"], "repo": man.get("repo", src)}
 
 
-
-
-
 def check_theme(root, src, market):
-
     step("Checking the theme")
-
     ident = default_id(src, "theme")
-
     pal = None
-
     if (root / "theme.json").exists():
-
         t = json_file(root / "theme.json", "theme.json")
-
         pal = t.get("palette")
-
         if not isinstance(pal, dict):
-
             raise Fail("theme.json has no palette")
-
         name = t.get("name", ident)
-
         bc = pal.get("borderColors")
-
         if bc is not None and (not isinstance(bc, list) or not all(isinstance(c, str) and HEX.match(c) for c in bc)):
-
             raise Fail("borderColors must be a list of #rrggbb colours")
-
     elif (root / "colors.toml").exists():
-
         pal = dict(re.findall(r'(?m)^\s*([A-Za-z]+)\s*=\s*"(#[0-9a-fA-F]{6})"', (root / "colors.toml").read_text()))
-
         name = ident
-
     else:
-
         name = ident
-
     if pal is not None:
-
         missing = [k for k in PALETTE if not (isinstance(pal.get(k), str) and HEX.match(pal[k]))]
-
         if missing:
-
             raise Fail("the palette lacks (or mistypes) " + ", ".join(missing))
-
     bgs = root / "backgrounds"
-
     media = [p for p in bgs.iterdir()] if bgs.is_dir() else []
-
     if pal is None and not media:
-
         raise Fail("neither a palette (theme.json, colors.toml) nor a backgrounds/ folder")
-
     for p in media:
-
         if p.suffix.lower() not in IMAGE_EXT | VIDEO_EXT:
-
             raise Fail(f"backgrounds/{p.name}: only images and videos belong here")
-
         real_image(p, MAX_MEDIA)
-
     if (root / "preview.png").exists():
-
         real_image(root / "preview.png", 4 << 20)
-
     if market and not (root / "README.md").is_file():
-
         raise Fail("README.md is missing")
-
     no_escapes(root)
-
     if not ID_RE.match(ident):
-
         raise Fail(f"the folder name gives the id '{ident}', which is not a valid id")
-
     return ident, {"label": name, "version": "", "repo": src}
 
 
-
-
-
 def check_cursor(root, src, market):
-
     step("Checking the cursor theme")
-
     ident = default_id(src, "cursor")
-
     xc, hc = root / "cursors", [root / "manifest.hl", root / "manifest.toml"]
-
     if not xc.is_dir() and not any(p.exists() for p in hc):
-
         raise Fail("neither an XCursor cursors/ folder nor a Hyprcursor manifest")
-
     for m in hc:
-
         if m.exists() and re.search(r"\.\./|=\s*/", m.read_text()):
-
             raise Fail(f"{m.name} points outside the theme")
-
     real_image(root / "icon.png", MAX_ICON) if (market or (root / "icon.png").exists()) else None
-
     for p in root.rglob("*"):
-
         if p.is_file() and os.access(p, os.X_OK) and xc not in p.parents:
-
             raise Fail(f"{p.relative_to(root)} is executable")
-
         if p.is_file() and xc in p.parents and not p.is_symlink() and not p.read_bytes()[:4] == b"Xcur":
-
             raise Fail(f"{p.relative_to(root)} is not an XCursor file")
-
     if market and not (root / "README.md").is_file():
-
         raise Fail("README.md is missing")
-
     no_escapes(root)
-
     return ident, {"label": ident, "version": "", "repo": src}
 
 
-
-
-
 def check_wallpaper(root, src, market):
-
     step("Checking the wallpaper pack")
-
     ident = default_id(src, "wallpapers")
-
     idx = json_file(root / "index.json", "index.json")
-
     if not isinstance(idx, list) or not idx:
-
         raise Fail("index.json must be a list of wallpapers")
-
     for i, w in enumerate(idx):
-
         if not isinstance(w, dict) or not all(k in w for k in ("file", "title", "credit", "url")):
-
             raise Fail(f"index.json entry {i + 1} needs file, title, credit and url")
-
         if "/" in w["file"] or w["file"].startswith(".") or Path(w["file"]).suffix.lower() not in IMAGE_EXT | VIDEO_EXT:
-
             raise Fail(f"index.json entry {i + 1}: '{w['file']}' is not a plain image or video name")
-
         if not str(w["url"]).startswith("https://"):
-
             raise Fail(f"index.json entry {i + 1}: the url must be https")
-
         if src.startswith("https://") and not w["url"].startswith(src.rstrip("/").removesuffix(".git").replace("github.com", "raw.githubusercontent.com")) \
-
                 and not w["url"].startswith(src.rstrip("/").removesuffix(".git")):
-
             raise Fail(f"index.json entry {i + 1}: the url is not inside the pack's own repo")
-
     if market and not (root / "README.md").is_file():
-
         raise Fail("README.md is missing")
-
     return ident, {"label": ident, "version": "", "repo": src, "index": idx}
-
-
-
 
 
 LOOK_PIECES = ("bar", "dock", "cursor", "lock", "sleep", "sddm")
 
 
-
-
-
 def check_look(root, src, market):
-
     step("Checking the look")
-
     look = json_file(root / "look.json", "look.json")
-
     ident = look.get("id", "")
-
     if not ID_RE.match(ident):
-
         raise Fail("look.json: id must be short, lowercase letters, digits and dashes")
-
     pieces = look.get("pieces")
-
     if not isinstance(pieces, dict) or not pieces or any(k not in LOOK_PIECES for k in pieces):
-
         raise Fail("look.json: pieces must hold one or more of " + ", ".join(LOOK_PIECES))
-
     for k in ("bar", "dock", "cursor"):
-
         v = pieces.get(k)
-
         if v is not None and (not isinstance(v, dict) or not all(isinstance(x, (str, int, float, bool)) for x in v.values())):
-
             raise Fail(f"the {k} piece must be a flat object of settings")
-
     if "sleep" in pieces:
-
         s = pieces["sleep"]
-
         for key, val in s.items():
-
             if key.endswith("Enabled") and isinstance(val, bool):
-
                 continue
-
             if key.endswith("Minutes") and isinstance(val, int) and 1 <= val <= 240:
-
                 continue
-
             raise Fail(f"the sleep piece: '{key}' is not a timing this shell knows")
-
     if "lock" in pieces:
-
         f = root / str(pieces["lock"])
-
         if not f.is_file() or f.suffix != ".conf" or "/" in str(pieces["lock"]):
-
             raise Fail("the lock piece must name a .conf file beside look.json")
-
         text = f.read_text()
-
         if re.search(r"\bcmd\[|\bexec\b|\$\(|`", text):
-
             raise Fail(f"{f.name} runs commands (cmd[...] or exec): a lock screen only draws")
-
     if "sddm" in pieces:
-
         d = root / str(pieces["sddm"]).rstrip("/")
-
         if not d.is_dir() or not (d / "Main.qml").is_file() or not (d / "metadata.desktop").is_file():
-
             raise Fail("the sddm piece must name a folder with Main.qml and metadata.desktop")
-
         qml = sorted(d.rglob("*.qml"))
-
         for f in qml:
-
             for pat, why in BANNED:
-
                 if re.search(pat, f.read_text(errors="replace")):
-
                     raise Fail(f"{f.relative_to(root)}: {why}")
-
         qmllint(qml, root)
-
     if market and not (root / "README.md").is_file():
-
         raise Fail("README.md is missing")
-
     no_escapes(root)
-
     return ident, {"label": look.get("name", ident), "version": str(look.get("version", "")),
-
                    "repo": look.get("repo", src), "pieces": sorted(pieces)}
 
 
-
-
-
 CHECKS = {"plugin": check_plugin, "theme": check_theme, "cursor": check_cursor,
-
           "wallpaper": check_wallpaper, "look": check_look}
 
 
-
-
-
 # ---- installed.json ----------------------------------------------------------------------
-
 def db_load():
-
     try:
-
         return json.loads((STATE / "installed.json").read_text())
-
     except Exception:
-
         return {}
-
-
-
 
 
 def db_save(d):
-
     STATE.mkdir(parents=True, exist_ok=True)
-
     tmp = STATE / "installed.json.tmp"
-
     tmp.write_text(json.dumps(d, indent=2) + "\n")
-
     tmp.replace(STATE / "installed.json")
 
 
-
-
-
 # ---- settings.json -----------------------------------------------------------------------
-
 def settings_update(fn):
-
     d = json.loads(SETTINGS.read_text()) if SETTINGS.exists() else {}
-
     fn(d)
-
     tmp = SETTINGS.with_suffix(".json.store")
-
     tmp.write_text(json.dumps(d, indent=2) + "\n")
-
     tmp.replace(SETTINGS)
 
 
-
-
-
 # ---- commands ------------------------------------------------------------------------------
-
 def do_check(kind, src, at, market):
-
     if kind not in CHECKS:
-
         raise Fail(f"an appimage is one file, not a git repo: try check-appimage")
-
     with tempfile.TemporaryDirectory(prefix="aequalyn-store-") as tmp:
-
         root, commit = fetch(src, at, tmp)
-
         ident, meta = CHECKS[kind](root, src, market)
-
         say(f"OK  {kind} '{ident}' passes every check" + (f" at {commit[:12]}" if commit else ""))
-
         return ident
 
 
-
-
-
 def do_install(kind, src, at, enable=True, quiet_update=False):
-
     if kind not in CHECKS:
-
         raise Fail(f"an appimage is one file, not a git repo: try import-appimage")
-
     with tempfile.TemporaryDirectory(prefix="aequalyn-store-") as tmp:
-
         root, commit = fetch(src, at, tmp)
-
         ident, meta = CHECKS[kind](root, src, False)
-
         dest = ROOTS[kind] / ident
-
         step(f"Installing to {dest}")
-
         dest.parent.mkdir(parents=True, exist_ok=True)
-
         if kind == "wallpaper":
-
             fetch_pack(root, meta.pop("index"), dest, src)
-
         else:
-
             staged = dest.parent / f".{ident}.new"
-
             shutil.rmtree(staged, ignore_errors=True)
-
             shutil.copytree(root, staged, symlinks=True)
-
             if dest.exists():
-
                 shutil.rmtree(dest)
-
             staged.rename(dest)
-
         d = db_load()
-
         d[f"{kind}:{ident}"] = dict(meta, kind=kind, id=ident, source=src, commit=commit or at or "")
-
         db_save(d)
-
         activate(kind, ident, enable and not quiet_update)
-
         say(f"OK  {kind} '{ident}' installed" + (f" at {commit[:12]}" if commit else ""))
 
 
-
-
-
 def fetch_pack(root, idx, dest, src):
-
     staged = dest.parent / f".{dest.name}.new"
-
     shutil.rmtree(staged, ignore_errors=True)
-
     staged.mkdir(parents=True)
-
     for w in idx:
-
         local = root / w["file"]
-
         out = staged / w["file"]
-
         if local.is_file():
-
             shutil.copy2(local, out)
-
         else:
-
             step(f"Fetching {w['file']}")
-
             r = run(["curl", "-fsSL", "--proto", "=https", "--max-filesize", str(MAX_MEDIA), "-o", str(out), w["url"]])
-
             if r.returncode:
-
                 shutil.rmtree(staged, ignore_errors=True)
-
                 raise Fail(f"could not fetch {w['url']}")
-
         if w.get("sha256") and hashlib.sha256(out.read_bytes()).hexdigest() != w["sha256"]:
-
             shutil.rmtree(staged, ignore_errors=True)
-
             raise Fail(f"{w['file']} is not the file that was checked (sha256 differs)")
-
         try:
-
             real_image(out, MAX_MEDIA)
-
         except Fail:
-
             shutil.rmtree(staged, ignore_errors=True)
-
             raise
-
     if dest.exists():
-
         shutil.rmtree(dest)
-
     staged.rename(dest)
 
 
-
-
-
 def activate(kind, ident, enable):
-
     if kind == "plugin":
-
         if enable:
-
             def on(d):
-
                 plugins = d.get("plugins")
-
                 if isinstance(plugins, list) and ident not in plugins:
-
                     plugins.append(ident)
-
             settings_update(on)
-
         if qs_ipc("plugins", "rescan") is None:
-
             say("   (the shell is not running: it loads the plugin when it starts)")
-
     elif kind == "theme":
-
         qs_ipc("theme", "reload")
-
     elif kind == "cursor":
-
         qs_ipc("plume", "themes")
 
 
-
-
-
 def do_remove(kind, ident):
-
     if kind == "appimage":
-
         do_remove_appimage(ident)
-
         return
-
     if not ID_RE.match(ident):
-
         raise Fail(f"not an id: {ident}")
-
     dest = ROOTS[kind] / ident
-
     d = db_load()
-
     if f"{kind}:{ident}" not in d and kind != "plugin":
-
         raise Fail(f"'{ident}' was not installed by the Store")
-
     if kind == "plugin":
-
         def off(s):
-
             if isinstance(s.get("plugins"), list):
-
                 s["plugins"] = [p for p in s["plugins"] if p != ident]
-
         settings_update(off)
-
         qs_ipc("plugins", "rescan")
-
     if kind == "theme":
-
         cur = CONF / "aequalyn/current/theme"
-
         if cur.is_symlink() and Path(os.readlink(cur)).name == ident:
-
             raise Fail(f"'{ident}' is the theme you wear: pick another one first")
-
     if kind == "cursor":
-
         worn = run(["gsettings", "get", "org.gnome.desktop.interface", "cursor-theme"]).stdout.strip().strip("'")
-
         if worn == ident:
-
             raise Fail(f"'{ident}' is the cursor you wear: pick another one first")
-
     if dest.exists():
-
         shutil.rmtree(dest)
-
     d.pop(f"{kind}:{ident}", None)
-
     db_save(d)
-
     if kind == "theme":
-
         qs_ipc("theme", "reload")
-
     say(f"OK  {kind} '{ident}' removed")
 
 
-
-
-
 def do_update(kind, ident):
-
     if kind == "appimage":
-
         raise Fail("an appimage is one file: import it again to replace it")
-
     rec = db_load().get(f"{kind}:{ident}")
-
     if not rec:
-
         raise Fail(f"'{ident}' was not installed by the Store")
-
     do_install(kind, rec["source"], None, enable=False, quiet_update=True)
 
 
-
-
-
 def do_list(kind, as_json):
-
     d = db_load()
-
     items = [v for k, v in sorted(d.items()) if not kind or v.get("kind") == kind]
-
     for it in items:
-
         # an appimage lives under its own file name; every other kind under its id
-
         it["present"] = (ROOTS[it["kind"]] / it.get("file", it["id"])).exists()
-
     if kind == "plugin" or not kind:
-
         root = ROOTS["plugin"]
-
         for p in sorted(root.glob("*/plugin.json")) if root.exists() else []:
-
             if not any(i["kind"] == "plugin" and i["id"] == p.parent.name for i in items):
-
                 try:
-
                     m = json.loads(p.read_text())
-
                     items.append({"kind": "plugin", "id": p.parent.name, "label": m.get("label", ""),
-
                                   "version": m.get("version", ""), "source": str(p.parent), "commit": "", "present": True})
-
                 except Exception:
-
                     pass
-
     if as_json:
-
         print(json.dumps(items, indent=2))
-
     else:
-
         for it in items:
-
             print(f"{it['kind']:<10} {it['id']:<24} {it.get('version', ''):<10} {it.get('commit', '')[:12]}")
 
 
-
-
-
 def do_apply_look(ident, piece):
-
     root = ROOTS["look"] / ident
-
     look = json_file(root / "look.json", f"the look '{ident}'")
-
     pieces = look["pieces"]
-
     wanted = list(pieces) if piece == "all" else [piece]
-
     for p in wanted:
-
         if p not in pieces:
-
             raise Fail(f"the look '{ident}' has no {p} piece")
-
     for p in wanted:
-
         v = pieces[p]
-
         step(f"Wearing its {p}")
-
         if p == "bar":
-
             settings_update(lambda d: d.__setitem__("barStyle", dict(d.get("barStyle") or {}, **v, enabled=True)))
-
         elif p == "dock":
-
             if qs_ipc("dock", "importLook", json.dumps(v)) != "ok":
-
                 raise Fail("the docks did not take the look (is the shell running, with docks on?)")
-
         elif p == "cursor":
-
             if qs_ipc("plume", "importLook", json.dumps(v)) != "ok":
-
                 raise Fail("Plume did not take the cursor look (is the shell running, with Plume on?)")
-
         elif p == "lock":
-
             lockdir = CONF / "hypr/lockscreens"
-
             lockdir.mkdir(parents=True, exist_ok=True)
-
             name = f"look-{ident}"
-
             shutil.copy2(root / v, lockdir / f"{name}.conf")
-
             settings_update(lambda d: d.setdefault("power", {}).__setitem__("lockStyle", name))
-
             tool = shutil.which("aequalyn-lockscreen") or str(HOME / ".local/bin/aequalyn-lockscreen")
-
             if os.path.exists(tool):
-
                 run([tool, "apply", name])
-
         elif p == "sleep":
-
             settings_update(lambda d: d.setdefault("power", {}).update(v))
-
             tool = shutil.which("aequalyn-idle") or str(HOME / ".local/bin/aequalyn-idle")
-
             if os.path.exists(tool):
-
                 run([tool])
-
         elif p == "sddm":
-
             src = root / str(v).rstrip("/")
-
             name = f"aequalyn-look-{ident}"
-
             say("   the login screen belongs to the system: sudo asks for your password")
-
             script = (f'install -d /usr/share/sddm/themes/{name} && cp -r "$1/." /usr/share/sddm/themes/{name}/ '
-
                       f'&& install -d /etc/sddm.conf.d && printf "[Theme]\\nCurrent={name}\\n" > /etc/sddm.conf.d/aequalyn-theme.conf')
-
             r = subprocess.run(["sudo", "sh", "-c", script, "sh", str(src)])
-
             if r.returncode:
-
                 raise Fail("the login screen theme was not installed")
-
     say(f"OK  look '{ident}': " + ", ".join(wanted))
 
 
-
-
-
 # ---- the Market ----------------------------------------------------------------------------
-
 def do_refresh():
-
     step(f"Fetching the catalog from {MARKET_URL}")
-
     STATE.mkdir(parents=True, exist_ok=True)
-
     with tempfile.TemporaryDirectory() as tmp:
-
         db, sha = Path(tmp) / "market.json", Path(tmp) / "market.json.sha256"
-
         for url, out in ((MARKET_URL, db), (MARKET_URL + ".sha256", sha)):
-
             r = run(["curl", "-fsSL", "--proto", "=https", "--max-filesize", str(20 << 20), "-o", str(out), url])
-
             if r.returncode:
-
                 raise Fail(f"could not fetch {url}")
-
         want = sha.read_text().split()[0] if sha.read_text().split() else ""
-
         if hashlib.sha256(db.read_bytes()).hexdigest() != want:
-
             raise Fail("the catalog does not match its sha256: it was not kept")
-
         cat = json_file(db, "the catalog")
-
         if not isinstance(cat.get("items"), list):
-
             raise Fail("the catalog has no items")
-
         shutil.copy2(db, STATE / "market.json")
-
     say(f"OK  catalog version {cat.get('version')}: {len(cat['items'])} items")
 
 
-
-
-
 def market_items():
-
     try:
-
         cat = json.loads((STATE / "market.json").read_text())
-
     except Exception:
-
         raise Fail("no catalog yet: run aequalyn-store refresh")
-
     from urllib.parse import urlparse
-
     d = db_load()
-
     out = []
-
     for it in cat.get("items", []):
-
         kind = it.get("kind", "")
-
         state = "not installed"
-
         if kind == "appimage":
-
             # an AppImage is pinned by the sha256 of the exact file, not a commit;
-
             # its row shows that sha where the git kinds show their commit
-
             rec = d.get(f"appimage:{it.get('id')}")
-
             if rec:
-
                 state = "installed" if rec.get("sha256") == it.get("sha256") else "update available"
-
             out.append(dict(it, commit=str(it.get("sha256", "")),
-
                             repo=it.get("repo") or urlparse(str(it.get("url", ""))).netloc, state=state))
-
         else:
-
             rec = d.get(f"{kind}:{it.get('id')}")
-
             if rec:
-
                 state = "installed" if rec.get("commit") == it.get("commit") else "update available"
-
             out.append(dict(it, state=state))
-
     return out
-
-
-
 
 
 def do_market(as_json):
-
     items = market_items()
-
     if as_json:
-
         print(json.dumps(items, indent=2))
-
     else:
-
         for it in items:
-
             print(f"{it['kind']:<10} {it['id']:<24} {it.get('commit', '')[:12]:<13} {it['state']}")
 
 
-
-
-
 def do_install_market_appimage(it):
-
     """a Market AppImage: fetched, checked against its pinned sha256, then imported
-
     (named after the item, so the catalog's id and the installed one agree)"""
-
     url = str(it.get("url", ""))
-
     sha = str(it.get("sha256", ""))
-
     if not url.startswith("https://"):
-
         raise Fail(f"'{it['id']}' has no https url to fetch")
-
     if not re.match(r"^[0-9a-f]{64}$", sha):
-
         raise Fail(f"the catalog has no pinned sha256 for '{it['id']}'")
-
     with tempfile.TemporaryDirectory(prefix="aequalyn-store-") as tmp:
-
         out = Path(tmp) / (it.get("file") or f"{it['id']}.AppImage")
-
         step(f"Fetching {url}")
-
         r = run(["curl", "-fsSL", "--proto", "=https", "--max-filesize", str(MAX_APPIMAGE), "-o", str(out), url])
-
         if r.returncode:
-
             raise Fail(f"could not fetch it: {r.stderr.strip()[:120]}")
-
         say("   checking the sha256 it was pinned at")
-
         got = hashlib.sha256()
-
         with open(out, "rb") as f:
-
             for chunk in iter(lambda: f.read(1 << 20), b""):
-
                 got.update(chunk)
-
         if got.hexdigest() != sha:
-
             raise Fail(f"{out.name} is not the file that was checked (sha256 differs)")
-
         import_appimage_file(out, url, sha)
 
 
-
-
-
 def do_install_market(ident):
-
     it = next((i for i in market_items() if i.get("id") == ident), None)
-
     if not it:
-
         raise Fail(f"'{ident}' is not in the catalog")
-
     if it["kind"] == "appimage":
-
         do_install_market_appimage(it)
-
         return
-
     if it["kind"] not in CHECKS:
-
         raise Fail(f"a {it['kind']} installs from its own page (build it with makepkg in a terminal)")
-
     if not re.match(r"^[0-9a-f]{40}$", str(it.get("commit", ""))):
-
         raise Fail(f"the catalog has no pinned commit for '{ident}'")
-
     do_install(it["kind"], it["repo"], it["commit"])
 
 
-
-
-
 # ---- apps from every backend ------------------------------------------------------------------
-
 PKG_RE = re.compile(r"^[A-Za-z0-9@._+-]{1,128}$")
 
 
-
-
-
 def http_json(url, data=None, headers=None):
-
     import time
-
     import urllib.request
-
     req = urllib.request.Request(url, data=json.dumps(data).encode() if data is not None else None,
-
                                  headers=dict({"User-Agent": "aequalyn-store", "Content-Type": "application/json"}, **(headers or {})))
-
     for attempt in range(3):
-
         try:
-
             with urllib.request.urlopen(req, timeout=12) as r:
-
                 return json.loads(r.read().decode())
-
         except Exception:
-
             if attempt == 2:
-
                 raise
-
             time.sleep(0.4 * (attempt + 1))
 
 
-
-
-
 def search_arch(q):
-
     if not q or not shutil.which("pacman"):
-
         return []
-
     out, cur = [], None
-
     for line in run(["pacman", "-Ss", "--", q]).stdout.splitlines():
-
         if not line.startswith(" "):
-
             m = re.match(r"^(\S+)/(\S+) (\S+)", line)
-
             cur = {"source": "Arch", "id": m.group(2), "name": m.group(2), "version": m.group(3),
-
                    "about": "", "icon": "", "popularity": 0} if m else None
-
             if cur:
-
                 out.append(cur)
-
         elif cur:
-
             cur["about"] = line.strip()
-
     return out[:60]
 
 
-
-
-
 def search_aur(q):
-
     if len(q) < 2:
-
         return []
-
     from urllib.parse import quote
-
     d = http_json("https://aur.archlinux.org/rpc/v5/search/" + quote(q) + "?by=name-desc")
-
     res = sorted(d.get("results", []), key=lambda r: -(r.get("Popularity") or 0))[:40]
-
     return [{"source": "AUR", "id": r["Name"], "name": r["Name"], "version": r.get("Version", ""),
-
              "about": r.get("Description") or "", "icon": "", "popularity": r.get("NumVotes", 0)} for r in res]
 
 
-
-
-
 def search_flathub(q, page):
-
     d = http_json("https://flathub.org/api/v2/search", {"query": q, "hitsPerPage": 40, "page": page})
-
     return [{"source": "Flatpak", "id": h["app_id"], "name": h.get("name", h["app_id"]),
-
              "about": h.get("summary") or "", "icon": h.get("icon") or "",
-
              "popularity": h.get("installs_last_month") or 0} for h in d.get("hits", [])], d.get("totalPages", 1)
 
 
-
-
-
 def search_snap(q):
-
     from urllib.parse import quote
-
     url = "https://api.snapcraft.io/v2/snaps/find?fields=title,summary,media&" + ("q=" + quote(q) if q else "category=featured")
-
     d = http_json(url, headers={"Snap-Device-Series": "16"})
-
     out = []
-
     for r in d.get("results", [])[:40]:
-
         sn = r.get("snap", {})
-
         icon = next((m["url"] for m in sn.get("media", []) if m.get("type") == "icon"), "")
-
         out.append({"source": "Snap", "id": r["name"], "name": sn.get("title") or r["name"],
-
                     "about": sn.get("summary") or "", "icon": icon, "popularity": 0})
-
     return out
-
-
-
 
 
 def do_search_apps(q, page):
-
     from concurrent.futures import ThreadPoolExecutor
-
     q = q.strip()[:80]
-
     jobs = {"Flatpak": lambda: search_flathub(q, page)}
-
     if page == 1:
-
         jobs.update({"Arch": lambda: search_arch(q), "AUR": lambda: search_aur(q), "Snap": lambda: search_snap(q)})
-
     results, errors, pages = [], {}, 1
-
     with ThreadPoolExecutor(max_workers=4) as ex:
-
         futs = {k: ex.submit(f) for k, f in jobs.items()}
-
         for k, f in futs.items():
-
             try:
-
                 r = f.result()
-
                 if k == "Flatpak":
-
                     r, pages = r
-
                 results += r
-
             except Exception as e:
-
                 errors[k] = str(e)[:120]
-
     # only names that are safe to hand to pacman, yay, flatpak and snap
-
     results = [r for r in results if PKG_RE.match(r["id"])]
-
     print(json.dumps({"query": q, "page": page, "flathubPages": pages, "errors": errors, "results": results}))
 
 
-
-
-
 # ---- one app, on every source that can install it ------------------------------------------
-
 # The Store's search gives a card per backend; the app's own page gathers all of
-
 # them, with the details each backend publishes (version, size, url, votes...).
-
 # Nothing is installed here: this only reads package metadata.
-
 def _pacman_info(name):
-
     out = []
-
     if not shutil.which("pacman"):
-
         return out
-
     for args in (["pacman", "-Si", "--", name], ["pacman", "-Qi", "--", name]):
-
         r = run(args)
-
         if r.returncode != 0:
-
             continue
-
         fields = {}
-
         for line in r.stdout.splitlines():
-
             if ":" not in line:
-
                 continue
-
             k, _, v = line.partition(":")
-
             fields[k.strip()] = v.strip()
-
         if not fields:
-
             continue
-
         installed = args[2] == "-Qi"
-
         src = {
-
             "source": "Arch",
-
             "id": fields.get("Name", name),
-
             "version": fields.get("Version", ""),
-
             "installed": installed,
-
             "installedVersion": fields.get("Version", "") if installed else "",
-
             "about": fields.get("Description", ""),
-
             "url": fields.get("URL", ""),
-
             "license": fields.get("Licenses", ""),
-
             "size": fields.get("Installed Size", "") or fields.get("Download Size", ""),
-
             "popularity": 0,
-
             "details": [{"label": k, "value": v} for k, v in fields.items()
-
                         if k in ("Repository", "Architecture", "Groups", "Provides", "Depends On",
-
                                  "Optional Deps", "Download Size", "Installed Size", "Packager",
-
                                  "Build Date", "Install Date", "Install Reason") and v not in ("", "None")],
-
         }
-
         out.append(src)
-
     return out[:1] if len(out) > 1 else out
 
 
-
-
-
 def _aur_info(name):
-
     from urllib.parse import quote
-
     d = http_json("https://aur.archlinux.org/rpc/v5/info/" + quote(name))
-
     hits = [r for r in d.get("results", [])
-
             if str(r.get("Name", "")).lower() == name.lower() or str(r.get("PackageBase", "")).lower() == name.lower()]
-
     if not hits:
-
         return None
-
     r = hits[0]
-
     installed = ""
-
     ip = run(["pacman", "-Qi", "--", r["Name"]])
-
     if ip.returncode == 0:
-
         for line in ip.stdout.splitlines():
-
             if line.startswith("Version"):
-
                 installed = line.partition(":")[2].strip()
-
     keys = [("Version", "Version"), ("Maintainer", "Maintainer"), ("NumVotes", "Votes"),
-
             ("Popularity", "Popularity"), ("License", "License"), ("Depends", "Depends on"),
-
             ("MakeDepends", "Build dependencies"), ("LastModified", "Last updated"),
-
             ("OutOfDate", "Out of date")]
-
     return {
-
         "source": "AUR", "id": r["Name"], "version": r.get("Version", ""),
-
         "installed": bool(installed), "installedVersion": installed,
-
         "about": r.get("Description", ""), "url": r.get("URL", ""),
-
         "license": r.get("License", ""), "size": "",
-
         "popularity": r.get("NumVotes", 0) or 0,
-
         "details": [{"label": label, "value": ", ".join(r[k]) if isinstance(r.get(k), list) else str(r.get(k, ""))}
-
                     for k, label in keys if r.get(k) not in (None, "", [], 0) or k == "Version"],
-
     }
-
-
-
 
 
 def _flathub_info(name):
-
     d = http_json("https://flathub.org/api/v2/appstream/" + name)
-
     if not d:
-
         return None
-
     releases = d.get("releases") or []
-
     version = ""
-
     if releases and isinstance(releases[0], dict):
-
         version = str(releases[0].get("version", ""))
-
     urls = d.get("urls") or {}
-
     if isinstance(urls, dict):
-
         url = urls.get("homepage") or urls.get("website") or ""
-
     else:
-
         url = ""
-
     details = []
-
     for key, label in (("developer_name", "Developer"), ("license", "License"),
-
                        ("categories", "Categories"), ("release_notes", "Release notes")):
-
         v = d.get(key)
-
         if v:
-
             details.append({"label": label, "value": ", ".join(v) if isinstance(v, list) else str(v)})
-
     if version:
-
         details.append({"label": "Latest release", "value": version})
-
     installed = False
-
     if shutil.which("flatpak"):
-
         installed = run(["flatpak", "info", "--", name]).returncode == 0
-
     about = d.get("summary") or ""
-
     desc = d.get("description") or ""
-
     if isinstance(desc, str):
-
         import re as _re
-
         desc = _re.sub(r"<[^>]+>", " ", desc)
-
         desc = " ".join(desc.split())
-
     return {
-
         "source": "Flatpak", "id": name, "version": version,
-
         "installed": installed, "installedVersion": "",
-
         "about": about, "url": url, "license": str(d.get("license") or ""), "size": "",
-
         "popularity": 0, "details": details, "description": desc[:2000],
-
         "screenshots": [s.get("url") for s in (d.get("screenshots") or []) if isinstance(s, dict) and s.get("url")][:6],
-
     }
-
-
-
 
 
 def _snap_info(name):
-
     fields = "title,summary,description,version,license,publisher,website,media,channel-map"
-
     url = "https://api.snapcraft.io/v2/snaps/info/" + name + "?fields=" + fields
-
     d = http_json(url, headers={"Snap-Device-Series": "16"})
-
     if not d or str(d.get("name", "")).lower() != name.lower():
-
         return None
-
     version = ""
-
     for ch in d.get("channel-map") or []:
-
         if ch.get("channel", {}).get("name", "").endswith("/stable"):
-
             version = str(ch.get("version", ""))
-
             break
-
     if not version and d.get("channel-map"):
-
         version = str(d["channel-map"][0].get("version", ""))
-
     pub = d.get("publisher") or {}
-
     details = []
-
     for value, label in ((pub.get("display-name"), "Publisher"), (d.get("license"), "License"),
-
                          (d.get("website"), "Website"), (d.get("contact"), "Contact")):
-
         if value:
-
             details.append({"label": label, "value": str(value)})
-
     if version:
-
         details.append({"label": "Latest version", "value": version})
-
     icon = next((m["url"] for m in d.get("media", []) if m.get("type") == "icon" and m.get("url")), "")
-
     installed = False
-
     if shutil.which("snap"):
-
         installed = run(["snap", "list", name]).returncode == 0
-
     return {
-
         "source": "Snap", "id": name, "version": version,
-
         "installed": installed, "installedVersion": "",
-
         "about": d.get("summary") or "", "url": d.get("website") or "",
-
         "license": d.get("license") or "", "size": "", "popularity": 0,
-
         "details": details, "description": str(d.get("description") or "")[:2000],
-
         "icon": icon,
-
     }
-
-
-
 
 
 def _name_key(value):
-
     """A display name and a package id compare the same way: letters and digits only."""
-
     return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
 
 
-
-
-
 PKG_SUFFIXES = ("bin", "git", "stable", "desktop", "desktopeditors", "edition",
-
                 "appimage", "cli", "community", "launcher")
 
 
-
-
-
 def _same_pkg(key, found):
-
     """A package name with only a packaging suffix is still the same app."""
-
     if not key or not found:
-
         return False
-
     if found == key:
-
         return True
-
     return any(suffix and found == key + suffix for suffix in PKG_SUFFIXES)
 
 
-
-
-
 def _hit_id(hits, name_keys, id_keys, source):
-
     """Pick the one id a manager's search actually meant, never a nearby app.
 
-
-
     Compare whole names only. "Notion" must not become notion-snap-reborn, and
-
     "Kitty" must not become kitty-img, just because an id starts with that word.
-
     Known packaging suffixes (-bin, -git, Desktop Editors) are the exception.
-
     """
-
     rows = []
-
     for hit in hits or []:
-
         ident = str(hit.get("id") or "").strip()
-
         if not PKG_RE.match(ident):
-
             continue
-
         shown = _name_key(hit.get("name"))
-
         packed = _name_key(ident)
-
         parts = [p for p in re.split(r"[^A-Za-z0-9]+", ident) if p]
-
         last = _name_key(parts[-1]) if parts else ""
-
         rows.append((ident, shown, packed, last))
-
     # an exact name is always better than a -git or -bin build of one. A search
-
     # hit with its own display name must agree with the app we are resolving:
-
     # Arch's "notion" is a tiling window manager, not Notion the note app.
-
     for ident, shown, packed, last in rows:
-
         if shown and not any(key in shown for key in name_keys + id_keys):
-
             continue
-
         name_hit = any(key in (shown, packed) for key in name_keys)
-
         id_hit = any(key in (shown, packed) for key in id_keys)
-
         # With a checked id in hand, a bare name match is not enough: Arch's
-
         # "notion" is a window manager while the card means Notion the note app.
-
         if name_hit and id_keys and not id_hit:
-
             continue
-
         if name_hit or id_hit:
-
             return ident
-
     # a checked id from the install button can carry the exact spelling the
-
     # store uses even when the display name does not ("onlyoffice-bin")
-
     for ident, shown, packed, last in rows:
-
         keys = id_keys if id_keys else name_keys
-
         if any(_same_pkg(key, value) for key in keys for value in (shown, packed)):
-
             return ident
-
     # Flatpak ids are reverse DNS: org.mozilla.firefox is still Firefox. A long
-
     # id checked by the install button is also trusted as one of its parts.
-
     if source == "Flatpak":
-
         for ident, shown, packed, last in rows:
-
             parts = [_name_key(p) for p in re.split(r"[^A-Za-z0-9]+", ident) if p]
-
             if last and last in name_keys:
-
                 return ident
-
             if any(len(key) >= 8 and key in parts for key in id_keys):
-
                 return ident
-
     return ""
 
 
-
-
-
 def _id_keys(ident):
-
     """The useful spellings of one package id, without its packaging suffixes."""
-
     parts = re.split(r"[^A-Za-z0-9]+", str(ident or ""))
-
     parts = [p for p in parts if p]
-
     if not parts:
-
         return []
-
     kept = [p for p in parts if p.lower() not in
-
             ("bin", "git", "stable", "desktop", "appimage", "cli", "gtk")]
-
     return list(dict.fromkeys(k for k in (
-
         _name_key(" ".join(parts)), _name_key(" ".join(kept)),
-
         _name_key(parts[-1]), _name_key(" ".join(kept[-2:]))
-
     ) if len(k) >= 2))
 
 
-
-
-
 def _resolve_ids(name, ids):
-
     """A curated card may know one id; All Apps learns the rest from a live search.
 
-
-
     Do the same here: look the app up in every manager we have no id for, then
-
     hand the exact ids to app-info. Checked ids are never replaced.
-
     """
-
     from concurrent.futures import ThreadPoolExecutor
-
     searches = {
-
         "Arch": search_arch,
-
         "AUR": search_aur,
-
         "Flatpak": lambda q: search_flathub(q, 1)[0],
-
         "Snap": search_snap,
-
     }
-
     name_keys = [_name_key(name)]
-
     id_keys = []
-
     for ident in ids.values():
-
         id_keys += _id_keys(ident)
-
     name_keys = list(dict.fromkeys(k for k in name_keys if len(k) >= 2))
-
     id_keys = list(dict.fromkeys(k for k in id_keys if len(k) >= 2))
-
     # the display name is what the app is called everywhere; a first word helps
-
     # with labels like "Heroic (Epic Games)", but a package id is not a search
-
     # term and must never pull in a different app
-
     queries = [name]
-
     first = next((p for p in re.split(r"[^A-Za-z0-9]+", name) if len(p) >= 3), "")
-
     if first and first.lower() != name.lower():
-
         queries.append(first)
-
     missing = [source for source in ("Arch", "AUR", "Flatpak", "Snap") if not ids[source]]
 
-
-
     def find(source):
-
         for query in queries[:3]:
-
             try:
-
                 ident = _hit_id(searches[source](query), name_keys, id_keys, source)
-
             except Exception:
-
                 continue
-
             if ident:
-
                 return source, ident
-
         return source, ""
 
-
-
     with ThreadPoolExecutor(max_workers=4) as ex:
-
         for source, ident in ex.map(find, missing):
-
             if ident:
-
                 ids[source] = ident
 
 
-
-
-
 def _words(value):
-
     return {w for w in re.findall(r"[a-zA-Z]{4,}", str(value or "").lower())
-
             if w not in {"with", "from", "that", "this", "your", "into", "more", "than"}}
 
 
-
-
-
 def _agrees(primary, other):
-
     """A name-resolved source must describe the same app as the checked one."""
-
     a = _words((primary.get("about") or "") + " " + (primary.get("description") or "")[:300])
-
     b = _words((other.get("about") or "") + " " + (other.get("description") or "")[:300])
-
     if not a or not b:
-
         return True
-
     return len(a & b) / float(min(len(a), len(b))) >= 0.15
 
 
-
-
-
 def do_app_info(q, ids=None):
-
     from concurrent.futures import ThreadPoolExecutor
-
     name = q.strip()[:80]
-
     # the display name can have spaces ("Visual Studio Code"); only backend ids
-
     # need the strict package-name form
-
-    if not name or not re.match(r"^[A-Za-z0-9][A-Za-z0-9 ._+'-]{0,79}$", name):        raise Fail("not an app name")
-
+    if not name or not re.match(r"^[A-Za-z0-9._+][A-Za-z0-9 ._+ '()-]{0,79}$", name):
+        raise Fail("not an app name")
     # the app's page knows the id each backend uses (Flatpak's org.mozilla.firefox
-
     # is not "firefox"), so ask each one for that exact id when it is given
-
     ids = {k: str((ids or {}).get(k, "")).strip() for k in ("Arch", "AUR", "Flatpak", "Snap")}
-
     for source, ident in ids.items():
-
         if ident and not PKG_RE.match(ident):
-
             raise Fail("not a package id: " + source)
-
     given = {value for value in ids.values() if value}
-
     explicit = any(ids.values())
-
     fetchers = {"Arch": _pacman_info, "AUR": _aur_info,
-
                 "Flatpak": _flathub_info, "Snap": _snap_info}
-
     if explicit:
-
+        # category cards arrive with only the id their install button needs;
+        # resolve the other managers by name so their page matches All Apps
+        _resolve_ids(name, ids)
+        jobs = {k: (lambda k=k: fetchers[k](ids[k])) for k in ids if ids[k]}
         # a curated card may know no AUR id even though the AUR carries the app
-
         # under its plain name; keep that version visible on every app page
-
         if not ids["AUR"]:
-
             jobs["AUR"] = lambda: _aur_info(name)
-
     else:
-
         jobs = {k: (lambda k=k: fetchers[k](name)) for k in fetchers}
-
     sources, errors = [], {}
-
     with ThreadPoolExecutor(max_workers=4) as ex:
-
         futs = {k: ex.submit(f) for k, f in jobs.items()}
-
         for k, f in futs.items():
-
             try:
-
                 got = f.result()
-
                 if got:
-
                     sources += got if isinstance(got, list) else [got]
-
             except Exception as e:
-
                 errors[k] = str(e)[:120]
-
-    sources.sort(key=lambda s: ["Arch", "AUR", "Flatpak", "Snap"].index(s["source"]))    app = {"key": name.lower(), "name": name, "icon": "", "about": "", "description": "",
-
+    primary = next((s for s in sources if s.get("id") in given), sources[0] if sources else {})
+    sources = [s for s in sources if s.get("id") in given or not primary or _agrees(primary, s)]
+    sources.sort(key=lambda s: (0 if s.get("id") in given else 1,
+                                ["Arch", "AUR", "Flatpak", "Snap"].index(s["source"])))
+    app = {"key": name.lower(), "name": name, "icon": "", "about": "", "description": "",
            "screenshots": [], "sources": sources}
-
     for s in sources:
-
         if not app["about"] and s.get("about"):
-
             app["about"] = s["about"]
-
         if not app["description"] and s.get("description"):
-
             app["description"] = s["description"]
-
         if not app["icon"] and s.get("icon"):
-
             app["icon"] = s["icon"]
-
         if not app["screenshots"] and s.get("screenshots"):
-
             app["screenshots"] = s["screenshots"]
-
     print(json.dumps({"query": name, "apps": [app], "errors": errors}))
 
 
-
-
-
 # ---- AppImages: one file is the whole app -------------------------------------------------
-
 # The AppImageLauncher way, no root: the file's magic is checked, its name and icon
-
 # read out of the embedded filesystem (never run), then it moves to ~/Applications and
-
 # gets a menu entry. set-appimage-handler makes this program what the desktop calls.
-
 # The Market carries them too: an item with a url and the sha256 of the exact file that
-
 # was checked, fetched and verified before the same import runs.
-
 MIMES = ("application/vnd.appimage", "application/x-appimage", "application/x-iso9660-appimage")
-
 HANDLER = "aequalyn-appimage"
-
 IMAGE_HEADS = ((b"\x89PNG", ".png"), (b"\xff\xd8\xff", ".jpg"), (b"GIF8", ".gif"), (b"RIFF", ".webp"),
-
                (b"/* XPM", ".xpm"))
-
 MAX_APPIMAGE = 4 << 30               # 4 GiB: a whole app, but bounded
-
 MIME_XML = """<?xml version="1.0" encoding="UTF-8"?>
-
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
-
   <mime-type type="application/vnd.appimage">
-
     <comment>AppImage application</comment>
-
     <generic-icon name="application-x-executable"/>
-
     <glob pattern="*.AppImage"/>
-
     <glob pattern="*.appimage"/>
-
   </mime-type>
-
   <mime-type type="application/x-appimage">
-
     <comment>AppImage application (type 2)</comment>
-
     <generic-icon name="application-x-executable"/>
-
     <glob pattern="*.AppImage"/>
-
   </mime-type>
-
   <mime-type type="application/x-iso9660-appimage">
-
     <comment>AppImage application (type 1)</comment>
-
     <generic-icon name="application-x-executable"/>
-
     <glob pattern="*.AppImage"/>
-
   </mime-type>
-
 </mime-info>
-
 """
 
 
-
-
-
 def appimage_type(path):
-
     """2, 1 or 0: which AppImage it is, 0 when it is not one"""
-
     try:
-
         with open(path, "rb") as f:
-
             head = f.read(0x8010)
-
     except OSError as e:
-
         raise Fail(str(e))
-
     # type 2: an ELF with AI\x02 at offset 8; type 1: an ISO 9660 with AI\x01 at 0x8008
-
     if head[:4] == b"\x7fELF" and head[8:11] == b"AI\x02":
-
         return 2
-
     if head[0x8001:0x8006] == b"CD001" and head[0x8008:0x800B] == b"AI\x01":
-
         return 1
-
     return 0
 
 
-
-
-
 def fs_offset(path):
-
     """type 2 keeps its filesystem right after the ELF runtime: where the ELF's
-
     section header table ends (the way appimagekit appends it), or at e_shoff
-
     itself. Squashfs ("hsqs"), dwarfs ("DWAR") or erofs (its magic a kilobyte in):
-
     the ELF can carry an embedded squashfs of its own, so the magic decides,
-
     never a plain search"""
-
     with open(path, "rb") as f:
-
         head = f.read(64)
-
         f.seek(0, 2)
-
         size = f.tell()
-
         shoff = int.from_bytes(head[0x28:0x30], "little")
-
         shentsize = int.from_bytes(head[0x3a:0x3c], "little") or 64
-
         shnum = int.from_bytes(head[0x3c:0x3e], "little")
-
         for off in (shoff + shnum * shentsize, shoff):
-
             if 0 < off < size - 4:
-
                 f.seek(off)
-
                 magic = f.read(4)
-
                 if magic == b"hsqs":
-
                     return off, "squashfs"
-
                 if magic == b"DWAR":
-
                     return off, "dwarfs"
-
                 if off + 1028 < size:
-
                     f.seek(off + 1024)          # erofs keeps its magic in its superblock
-
                     if f.read(4) == b"\xe2\xe1\xf5\xe0":
-
                         return off, "erofs"
-
     raise Fail("its header points at no filesystem inside it (squashfs, dwarfs and erofs are what this knows)")
 
 
-
-
-
 def real_appimage_icon(path):
-
     """(data, suffix, "") when it is a small real image, (None, "", why) when it
-
     is not. A gzipped svg (the spec's $APPICON.svgz) arrives decompressed, as the
-
     plain svg every renderer reads"""
-
     if not path.is_file():
-
         return None, "", "missing"
-
     if path.stat().st_size > MAX_ICON:
-
         return None, "", f"larger than {MAX_ICON >> 20} MiB"
-
     head = path.read_bytes()[:512]
-
     for magic, ext in IMAGE_HEADS:
-
         if head.startswith(magic):
-
             return path.read_bytes(), ext, ""
-
     if head.startswith(b"\x1f\x8b"):
-
         import gzip
-
         try:
-
             data = gzip.open(path).read(MAX_ICON + 1)
-
         except OSError:
-
             return None, "", "not an image"
-
         if b"<svg" in data[:512] and len(data) <= MAX_ICON:
-
             return data, ".svg", ""
-
         return None, "", "not an image"
-
     # an svg can sit behind as much as half a page of xml before its root tag
-
     if b"<svg" in head:
-
         return path.read_bytes(), ".svg", ""
-
     return None, "", "not an image"
 
 
-
-
-
 def read_desktop(text):
-
     """the plain keys of [Desktop Entry]. Name= is required by the spec, but not
-
     every file was made to the spec: an English Name[...] (or Comment[...]) fills
-
     the hole when the plain key is missing"""
-
     keys = {"Name": "name", "Comment": "comment", "Icon": "icon",
-
             "Categories": "categories", "X-AppImage-Version": "version"}
-
     out = dict.fromkeys(keys.values(), "")
-
     loc = {"name": [], "comment": []}
-
     where = False
-
     for line in text.splitlines():
-
         s = line.strip()
-
         if s.startswith("["):
-
             where = s == "[Desktop Entry]"
-
             continue
-
         if where and "=" in s:
-
             k, _, v = s.partition("=")
-
             k = k.strip()
-
             if k in keys and not out[keys[k]]:
-
                 out[keys[k]] = v.strip()
-
             elif k.startswith("Name["):
-
                 loc["name"].append((k, v.strip()))
-
             elif k.startswith("Comment["):
-
                 loc["comment"].append((k, v.strip()))
 
-
-
     def first_locale(field, label):
-
         for pref in (f"{label}[en_US]", f"{label}[en]", ""):
-
             for k, v in loc[field]:
-
                 if pref == "" or k == pref:
-
                     return v
-
         return ""
 
-
-
     if not out["name"]:
-
         out["name"] = first_locale("name", "Name")
-
     if not out["comment"]:
-
         out["comment"] = first_locale("comment", "Comment")
-
     return out
-
-
-
 
 
 def read_appstream(text):
-
     """what an AppStream metainfo carries, ignoring namespaces: the name, the
-
     summary, and an icon by its theme name or its path in the image"""
-
     import xml.etree.ElementTree as ET
-
     try:
-
         root = ET.fromstring(text)
-
     except Exception:
-
         return {}
-
     out = {}
-
     for el in root.iter():
-
         tag = el.tag.rsplit("}", 1)[-1]
-
         textof = (el.text or "").strip()
-
         if tag == "name" and "name" not in out:
-
             out["name"] = textof
-
         elif tag == "summary" and "summary" not in out:
-
             out["summary"] = textof
-
         elif tag == "icon" and "icon" not in out and (el.get("type") or "").strip() in ("stock", "local"):
-
             out["icon"] = textof
-
     return out
 
 
-
-
-
 def walk_tree(root):
-
     """every file of an unpacked image, as its own names, plus its symlinks"""
-
     names, links = [], {}
-
     for dirpath, dirnames, filenames in os.walk(root):
-
         for n in list(dirnames) + filenames:
-
             p = Path(dirpath) / n
-
             rel = p.relative_to(root).as_posix()
-
             names.append(rel)
-
             if p.is_symlink():
-
                 try:
-
                     links[rel] = os.readlink(p)
-
                 except OSError:
-
                     pass
-
     return names, links
 
 
-
-
-
 def icon_want(meta, names, resolve):
-
     """every place an AppImage keeps its icon, best first: .DirIcon, the one Icon=
-
     names (case matched or not, extension or not, absolute or relative), the theme
-
     directories by size, pixmaps, and the root as the last look"""
-
     want = []
 
-
-
     def add(name):
-
         name = resolve(name)
-
         if name and name not in want:
-
             want.append(name)
 
-
-
     add(".DirIcon")
-
     icon = str(meta.get("icon", "")).strip()
-
     base = os.path.basename(icon.lstrip("/")) if icon else ""
-
     if base:
-
         add(icon.lstrip("/"))
-
         for ext in ("", ".png", ".svg", ".svgz", ".xpm"):
-
             add(base + ext)
-
         # the same names, matched without regard to case
-
         lower = {n.lower(): n for n in names}
-
         for probe in (icon.lstrip("/"), base, base + ".png", base + ".svg"):
-
             hit = lower.get(probe.lower())
-
             if hit:
-
                 add(hit)
-
         # where the themes keep them: hicolor first, its largest size, then any
-
         # other theme, then the pixmaps of old (a reverse-domain name keeps its
-
         # dots: only the extension is stripped)
-
         def stem(n):
-
             return n.rsplit("/", 1)[-1].rsplit(".", 1)[0].lower()
 
-
-
         def themed(prefix):
-
             hits = [n for n in names if n.startswith(prefix) and stem(n) == base.lower()]
-
             big = lambda n: (1 << 20) if "scalable" in n else (int(n[len(prefix):].split("x")[0].replace("/", ""))
-
                                                                 if n[len(prefix):].split("x")[0].isdigit() else 0)
-
             return sorted(hits, key=big, reverse=True)
-
         for n in (themed("usr/share/icons/hicolor/") + themed("usr/share/icons/")
-
                   + [n for n in names if n.startswith("usr/share/pixmaps/") and stem(n) == base.lower()]):
-
             add(n)
-
     # the root, as the last look: the app's own image by whatever name, then any
-
     for n in sorted(names):
-
         if "/" not in n and not n.startswith(".") and Path(n).suffix.lower() in (".png", ".svg", ".svgz", ".xpm"):
-
             add(n)
-
     return want
 
 
-
-
-
 def tree_readers(tree, links):
-
     """read from an unpacked tree the same way the squashfs listing is read"""
-
     def resolve(name, hops=0):
-
         while name in links and hops < 4:
-
             name, hops = links[name], hops + 1
-
         return name
 
-
-
     def pull(want):
-
         return {w: tree / w for w in want if (tree / w).is_file()}
-
-
 
     return resolve, pull
 
 
-
-
-
 def appimage_peek(kind, path, tmp):
-
     """(meta, icon data, icon suffix, where the icon was, notes): a look inside,
-
     with nothing inside it run"""
-
     links, names, notes = {}, [], []
-
     if kind == 2:
-
         off, fs = fs_offset(path)
-
         if fs == "dwarfs":
-
             # dwarfs (appdwarf and Ghostty pack with it): only dwarfsextract reads
-
             # it, and it is not in the repositories -- when it is there, the very
-
             # same look runs; when it is not, the honest note says so
-
             tool = shutil.which("dwarfsextract")
-
             if not tool:
-
                 raise Fail("it is packed with dwarfs, which needs dwarfsextract "
-
                            "(the dwarfs package, from the AUR) to be read")
-
             tree = Path(tmp) / "inside"
-
             step(f"Unpacking its dwarfs filesystem with {os.path.basename(tool)}")
-
             r = run([tool, "-i", str(path), "-o", str(off), "-O", str(tree)])
-
             if r.returncode or not tree.is_dir():
-
                 raise Fail("dwarfsextract could not read it: " + (r.stderr.strip()[:120] or "nothing came out"))
-
             names, links = walk_tree(tree)
-
             resolve, pull = tree_readers(tree, links)
-
         elif fs == "erofs":
-
             # erofs, the other filesystem a type-2 runtime can carry: read with
-
             # erofs-utils, the same way
-
             tool = shutil.which("fsck.erofs")
-
             if not tool:
-
                 raise Fail("it is packed with erofs, which needs fsck.erofs "
-
                            "(the erofs-utils package) to be read")
-
             tree = Path(tmp) / "inside"
-
             payload = Path(tmp) / "payload.img"
-
             with open(path, "rb") as src, open(payload, "wb") as dst:
-
                 src.seek(off)
-
                 shutil.copyfileobj(src, dst)
-
             step(f"Unpacking its erofs filesystem with {os.path.basename(tool)}")
-
             r = run([tool, f"--extract={tree}", str(payload)])
-
             if r.returncode or not tree.is_dir():
-
                 raise Fail("fsck.erofs could not read it: " + (r.stderr.strip()[:120] or "nothing came out"))
-
             names, links = walk_tree(tree)
-
             resolve, pull = tree_readers(tree, links)
-
         else:
-
             tool = shutil.which("unsquashfs")
-
             if not tool:
-
                 raise Fail("unsquashfs is not installed (squashfs-tools)")
-
             r = run([tool, "-o", str(off), "-ll", str(path)])
-
             if r.returncode:
-
                 raise Fail(f"unsquashfs could not read it: {r.stderr.strip()[:120]}")
-
             for line in r.stdout.splitlines():
-
                 f = line.split(None, 5)
-
                 if len(f) == 6 and f[5].startswith("squashfs-root/"):
-
                     rest = f[5][len("squashfs-root/"):]
-
                     if " -> " in rest:       # a symlink: remember where it points
-
                         name, _, target = rest.partition(" -> ")
-
                         links[name] = target
-
                         names.append(name)
-
                     else:
-
                         names.append(rest)
 
-
-
             def resolve(name, hops=0):
-
                 while name in links and hops < 4:
-
                     name, hops = links[name], hops + 1
-
                 return name
 
-
-
             def pull(want):
-
                 got, out = {}, Path(tmp) / "inside"
-
                 run([tool, "-f", "-o", str(off), "-d", str(out), str(path)] + list(want))
-
                 for w in want:
-
                     f = out / w
-
                     if f.is_file():       # a lone symlink extracts broken: never kept
-
                         got[w] = f
-
                 return got
-
     else:
-
         # type 1: an ISO 9660 with Rock Ridge (zisofs included), which bsdtar reads
-
         tool = shutil.which("bsdtar")
-
         if not tool:
-
             raise Fail("bsdtar is not installed (libarchive)")
-
         r = run([tool, "-tf", str(path)])
-
         if r.returncode:
-
             raise Fail(f"bsdtar could not read it: {r.stderr.strip()[:120]}")
-
         names = [n for n in r.stdout.splitlines() if n not in ("", ".")]
 
-
-
         def resolve(name):
-
             return name
 
-
-
         def pull(want):
-
             got, out = {}, Path(tmp) / "inside"
-
             out.mkdir(parents=True, exist_ok=True)
-
             for w in want:
-
                 rr = subprocess.run([tool, "-xOf", str(path), w], capture_output=True)
-
                 if rr.returncode == 0 and rr.stdout:
-
                     f = out / w.replace("/", "_")
-
                     f.write_bytes(rr.stdout)
-
                     got[w] = f
-
             return got
-
     root_entries = [n for n in names if "/" not in n and not n.startswith(".")]
-
     # the .desktop: at the root first (appimagetool's way, a symlink followed), else
-
     # in the standard place deeper in (electron-builder and friends)
-
     desk = next((n for n in sorted(root_entries) if n.endswith(".desktop")), "")
-
     if not desk:
-
         deep = sorted(n for n in names if n.startswith("usr/share/applications/") and n.endswith(".desktop"))
-
         if deep:
-
             desk = deep[0]
-
     meta = {}
-
     if desk:
-
         desk = resolve(desk)
-
         got = pull([desk])
-
         if desk in got:
-
             meta = read_desktop(got[desk].read_text(errors="replace"))
-
         else:
-
             notes.append(f"{desk} could not be read")
-
     else:
-
         notes.append("there is no .desktop inside it")
-
     # the AppStream metainfo, the spec's other channel: a name, a summary, an icon
-
     # for the packs whose .desktop says too little or is not there at all
-
     appdata = next((n for n in names
-
                     if (n.startswith("usr/share/metainfo/") or n.startswith("usr/share/appdata/"))
-
                     and (n.endswith(".appdata.xml") or n.endswith(".metainfo.xml"))), "")
-
     if appdata:
-
         got = pull([appdata])
-
         if appdata in got:
-
             a = read_appstream(got[appdata].read_text(errors="replace"))
-
             if a.get("name") and not meta.get("name"):
-
                 meta["name"] = a["name"]
-
                 notes.append("its name comes from its AppStream metadata")
-
             if a.get("summary") and not meta.get("comment"):
-
                 meta["comment"] = a["summary"]
-
             if a.get("icon") and not meta.get("icon"):
-
                 meta["icon"] = a["icon"].lstrip("/")
-
     # the icon, each place one can be, best first
-
     for name in dict.fromkeys(icon_want(meta, names, resolve)):
-
         got = pull([name])
-
         if name in got:
-
             data, suffix, why = real_appimage_icon(got[name])
-
             if suffix:
-
                 return meta, data, suffix, name, notes
-
     return meta, None, "", "", notes
 
 
-
-
-
 def appimage_id(name):
-
     """the id an AppImage's file name gives"""
-
     ident = re.sub(r"[^a-z0-9-]", "-", Path(name).stem.lower()).strip("-")
-
     if not ID_RE.match(ident):
-
         ident = ("app-" + ident).strip("-")
-
     return ident[:40].rstrip("-") or "app"
 
 
-
-
-
 # a 5x7 typeface, the classic one, for the badge an app without any icon gets
-
 FONT = {
-
     "A": "01110 10001 10001 11111 10001 10001 10001", "B": "11110 10001 11110 10001 10001 10001 11110",
-
     "C": "01110 10001 10000 10000 10000 10001 01110", "D": "11110 10001 10001 10001 10001 10001 11110",
-
     "E": "11111 10000 11110 10000 10000 10000 11111", "F": "11111 10000 11110 10000 10000 10000 10000",
-
     "G": "01110 10001 10000 10111 10001 10001 01111", "H": "10001 10001 11111 10001 10001 10001 10001",
-
     "I": "01110 00100 00100 00100 00100 00100 01110", "J": "00111 00010 00010 00010 00010 10010 01100",
-
     "K": "10001 10010 10100 11000 10100 10010 10001", "L": "10000 10000 10000 10000 10000 10000 11111",
-
     "M": "10001 11011 10101 10101 10001 10001 10001", "N": "10001 11001 10101 10011 10001 10001 10001",
-
     "O": "01110 10001 10001 10001 10001 10001 01110", "P": "11110 10001 10001 11110 10000 10000 10000",
-
     "Q": "01110 10001 10001 10001 10101 10010 01101", "R": "11110 10001 10001 11110 10100 10010 10001",
-
     "S": "01111 10000 10000 01110 00001 00001 11110", "T": "11111 00100 00100 00100 00100 00100 00100",
-
     "U": "10001 10001 10001 10001 10001 10001 01110", "V": "10001 10001 10001 10001 10001 01010 00100",
-
     "W": "10001 10001 10001 10101 10101 11011 10001", "X": "10001 10001 01010 00100 01010 10001 10001",
-
     "Y": "10001 10001 01010 00100 00100 00100 00100", "Z": "11111 00001 00010 00100 01000 10000 11111",
-
     "0": "01110 10001 10011 10101 11001 10001 01110", "1": "00100 01100 00100 00100 00100 00100 01110",
-
     "2": "01110 10001 00001 00010 00100 01000 11111", "3": "11111 00010 00100 00010 00001 10001 01110",
-
     "4": "00010 00110 01010 10010 11111 00010 00010", "5": "11111 10000 11110 00001 00001 10001 01110",
-
     "6": "00110 01000 10000 11110 10001 10001 01110", "7": "11111 00001 00010 00100 01000 01000 01000",
-
     "8": "01110 10001 10001 01110 10001 10001 01110", "9": "01110 10001 10001 01111 00001 00010 01100",
-
     "?": "01110 10001 00001 00010 00100 00000 00100",
-
 }
 
 
-
-
-
 def badge_png(letter, out_path):
-
     """a rounded dark square with the app's initial: the icon of last resort, so
-
     the apps menu always has one. No library, no font file: one glyph of the
-
     classic 5x7 typeface, scaled and centred"""
-
     import struct
-
     import zlib
-
     size, corner = 128, 28
-
     bg, fg = (30, 34, 53), (192, 202, 245)
-
     rows = FONT.get(letter.upper(), FONT["?"]).split(" ")
 
-
-
     def chunk(tag, data):
-
         return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff)
 
-
-
     raw = bytearray()
-
     for y in range(size):
-
         raw.append(0)          # no filter
-
         for x in range(size):
-
             dx = max(corner - x, x - (size - 1 - corner), 0)
-
             dy = max(corner - y, y - (size - 1 - corner), 0)
-
             inside = dx * dx + dy * dy <= corner * corner
-
             cell = 16          # the 5x7 glyph, scaled to 80x112 and centred
-
             gx, gy = (x - (size - 5 * cell) // 2) // cell, (y - (size - 7 * cell) // 2) // cell
-
             on = (0 <= gx < 5 and 0 <= gy < 7 and rows[gy][gx] == "1")
-
             raw += bytes(bg + (255,)) if inside and not on else bytes(fg + (255,)) if inside and on else b"\0\0\0\0"
-
     png = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0))
-
            + chunk(b"IDAT", zlib.compress(bytes(raw))) + chunk(b"IEND", b""))
-
     Path(out_path).write_bytes(png)
 
 
-
-
-
 def appimage_prepare(src, label=""):
-
     """(ident, meta, notes, icon, icon_from): a checked look, before anything is
-
     moved (icon: (bytes, suffix) or (None, ""); icon_from: where inside the file)"""
-
     p = Path(src).expanduser()
-
     step(f"Checking {label or p}")
-
     if not p.is_file():
-
         raise Fail(f"{p} is not there")
-
     kind = appimage_type(p)
-
     if not kind:
-
         raise Fail(f"{p.name} is not a standard AppImage (no AppImage magic: a type-0 "
-
                    "look-alike, a portable binary, has nothing embedded to integrate)")
-
     say(f"   AppImage type {kind}, {p.stat().st_size / (1 << 20):.0f} MiB")
-
     notes = []
-
     meta = {"name": p.stem, "comment": "", "icon": "", "version": "", "categories": ""}
-
     icon, icon_from = (None, ""), ""
-
     with tempfile.TemporaryDirectory(prefix="aequalyn-store-") as tmp:
-
         try:
-
             m, icon_data, suffix, where, peek_notes = appimage_peek(kind, p, tmp)
-
             notes += peek_notes
-
             meta.update(m)
-
             icon, icon_from = (icon_data, suffix), where
-
             say(f"   {p.name}: read out of the file, nothing inside it was run")
-
         except Fail as e:
-
             notes.append(f"could not look inside it ({e}): the name is taken from the file name")
-
     if not meta["name"]:
-
         meta["name"] = p.stem
-
     return appimage_id(p.name), meta, notes, icon, icon_from
 
 
-
-
-
 def do_check_appimage(src):
-
     ident, meta, notes, icon, icon_from = appimage_prepare(src)
-
     for n in notes:
-
         say("   " + n)
-
     say(f"   name: {meta['name']}" + (f", version {meta['version']}" if meta["version"] else "")
-
         + (f", icon at {icon_from}" if icon[0] else ", no icon inside it could be read (a badge with its initial is made)"))
-
     say(f"OK  appimage '{ident}' passes every check (import moves it to {APPS_DIR})")
 
 
-
-
-
 def import_appimage_file(p, source, sha=""):
-
     """the whole import of one checked file already on disk: it moves to ~/Applications
-
     and gets its menu entry (source: where it came from, a path or an https url)"""
-
     ident, meta, notes, icon, icon_from = appimage_prepare(str(p), source if source.startswith("https://") else "")
-
     for n in notes:
-
         say("   " + n)
-
     dest = APPS_DIR / p.name
-
     step(f"Moving it to {dest}")
-
     dest.parent.mkdir(parents=True, exist_ok=True)
-
     if p.resolve() == dest.resolve():
-
         say("   it is already there: its menu entry is written again")
-
     else:
-
         shutil.move(str(p), str(dest))
-
     dest.chmod(0o755)
-
     # an icon always lands in the menu: its own when one could be read, a badge
-
     # with the app's initial when none could
-
     APPIMAGE_ICONS.mkdir(parents=True, exist_ok=True)
-
     for old in APPIMAGE_ICONS.glob(ident + ".*"):
-
         old.unlink()
-
     iconpath = ""
-
     if icon[0]:
-
         iconpath = str(APPIMAGE_ICONS / (ident + icon[1]))
-
         Path(iconpath).write_bytes(icon[0])
-
         say(f"   icon: {icon_from}")
-
     else:
-
         iconpath = str(APPIMAGE_ICONS / (ident + ".png"))
-
         badge_png(next((c for c in meta["name"] if c.isalnum()), "?"), iconpath)
-
         say("   icon: none inside it could be read, so a badge with its initial stands in")
-
     step("Writing its menu entry")
-
     apps = DATA / "applications"
-
     apps.mkdir(parents=True, exist_ok=True)
-
     desk = apps / f"aequalyn-appimage-{ident}.desktop"
-
     q = str(dest)
-
     if " " in q:
-
         q = f'"{q}"'
 
-
-
     def esc(s):
-
         return str(s).replace("\r", " ").replace("\n", " ").strip()
 
-
-
     cats = esc(meta["categories"]) or "Utility"
-
     if not cats.endswith(";"):
-
         cats += ";"
-
     desk.write_text("[Desktop Entry]\nType=Application\n"
-
                     + "Name=" + esc(meta["name"]) + "\n"
-
                     + f"Exec={q} %U\nTryExec={dest}\nTerminal=false\n"
-
                     + (("Comment=" + esc(meta["comment"]) + "\n") if meta["comment"] else "")
-
                     + "Icon=" + (iconpath or "application-x-executable") + "\n"
-
                     + "Categories=" + cats + "\n"
-
                     + f"X-Aequalyn-AppImage={ident}\n")
-
     d = db_load()
-
     d[f"appimage:{ident}"] = {"kind": "appimage", "id": ident, "label": meta["name"], "version": meta["version"],
-
                               "file": p.name, "path": str(dest), "icon": iconpath, "desktop": str(desk),
-
                               "source": source, "sha256": sha}
-
     db_save(d)
-
     if shutil.which("update-desktop-database"):
-
         run(["update-desktop-database", str(apps)])
-
     say(f"OK  appimage '{ident}' imported: it shows in the launcher as {meta['name']}")
 
 
-
-
-
 def do_import_appimage(src):
-
     p = Path(src).expanduser()
-
     import_appimage_file(p, str(p))
 
 
-
-
-
 def do_remove_appimage(ident):
-
     """one back out of the launcher: its menu entry, its icon and its record.
-
     The AppImage itself is the user's own file -- it is never deleted here."""
-
     d = db_load()
-
     rec = d.get(f"appimage:{ident}")
-
     if not rec:
-
         raise Fail(f"'{ident}' was not imported by the Store")
-
     step(f"Removing {rec.get('label') or ident}")
-
     for key in ("desktop", "icon"):
-
         p = rec.get(key)
-
         if p and Path(p).is_file():
-
             Path(p).unlink()
-
     d.pop(f"appimage:{ident}")
-
     db_save(d)
-
     if shutil.which("update-desktop-database"):
-
         run(["update-desktop-database", str(DATA / "applications")])
-
     where = rec.get("path") or str(APPS_DIR / rec.get("file", ""))
-
     say(f"OK  appimage '{ident}' is out of the launcher; its file is kept at {where}")
 
 
-
-
-
 def do_set_appimage_handler():
-
     step("Writing the AppImage MIME types")
-
     pkgs = DATA / "mime/packages"
-
     pkgs.mkdir(parents=True, exist_ok=True)
-
     (pkgs / "aequalyn-appimage.xml").write_text(MIME_XML)
-
     step("Writing the handler's menu entry")
-
     apps = DATA / "applications"
-
     apps.mkdir(parents=True, exist_ok=True)
-
     me = shutil.which("aequalyn-store") or str(HOME / ".local/bin/aequalyn-store")
-
     q = me if " " not in me else f'"{me}"'
-
     (apps / f"{HANDLER}.desktop").write_text(
-
         "[Desktop Entry]\nType=Application\nName=Aequalyn Store\n"
-
         + "Comment=Asks the Aequalyn Store to import or run an AppImage\n"
-
         + f"Exec={q} open-appimage %f\n"
-
         + "Icon=application-x-executable\nTerminal=false\nNoDisplay=true\n"
-
         + "MimeType=" + ";".join(MIMES) + ";\n")
-
     for tool, arg in (("update-mime-database", DATA / "mime"), ("update-desktop-database", apps)):
-
         if shutil.which(tool):
-
             run([tool, str(arg)])
-
         else:
-
             say(f"   ({tool} is not installed: a file manager may not see the types until it is)")
-
     step("Becoming the default for .AppImage")
-
     for m in MIMES:
-
         r = run(["xdg-mime", "default", f"{HANDLER}.desktop", m])
-
         if r.returncode:
-
             raise Fail(f"xdg-mime could not set {m}: {r.stderr.strip()[:120]}")
-
         say(f"   {m} -> " + (run(["xdg-mime", "query", "default", m]).stdout.strip() or "(no default)"))
-
     say("OK  the Store opens .AppImage files: a new one arrives at its AppImages page, one already imported runs")
 
 
-
-
-
 def do_open_appimage(src):
-
     """what the desktop calls with an .AppImage: one already imported runs, a new
-
     one arrives at the Store's AppImages page (qs ipc call store appimage <path>)"""
-
     p = Path(src).expanduser()
-
     if not p.is_file():
-
         raise Fail(f"{p} is not there")
-
     rec = next((v for v in db_load().values()
-
                 if v.get("kind") == "appimage" and v.get("file") == p.name), None)
-
     if rec and Path(rec.get("path", "")).is_file():
-
         say(f"Running {rec.get('label') or p.name}")
-
         try:
-
             subprocess.Popen([rec["path"]], start_new_session=True,
-
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
         except OSError as e:
-
             raise Fail(f"could not run it: {e}")
-
         return
-
     if qs_ipc("store", "appimage", str(p)) == "ok":
-
         say(f"OK  {p.name} is at the Store's AppImages page")
-
         return
-
     say(f"the shell is not running: open the Store (Super + Alt + S) and import {p.name} there")
-
     if shutil.which("notify-send"):
-
         run(["notify-send", "-a", "Aequalyn", "AppImage",
-
              f"Open the Store (Super + Alt + S) to import {p.name}"])
 
 
-
-
-
 def main(argv):
-
     args = list(argv)
-
     if not args or args[0] in ("-h", "--help", "help"):
-
         print(__doc__.strip())
-
         return 0
-
     flags = {}
-
     for f in ("--at", "--piece", "--page", "--arch", "--aur", "--flatpak", "--snap"):
-
         if f in args:
-
             i = args.index(f)
-
             if i + 1 >= len(args):
-
                 raise Fail(f"{f} needs a value")
-
             flags[f] = args[i + 1]
-
             del args[i:i + 2]
-
     switches = {s for s in ("--json", "--market", "--enable", "--no-enable") if s in args}
-
     args = [a for a in args if a not in switches]
-
     cmd = args[0]
-
     # the plan's spellings: install-plugin, list-themes ...
-
     m = re.match(r"^(check|install|update|remove|list)-(plugin|theme|cursor|wallpaper|look)s?$", cmd)
-
     if m:
-
         cmd, args = m.group(1), [m.group(1), m.group(2)] + args[1:]
-
     if cmd == "list":
-
         kind = args[1] if len(args) > 1 else ""
-
         if kind and kind not in KINDS:
-
             raise Fail(f"unknown kind: {kind}")
-
         do_list(kind, "--json" in switches)
-
         return 0
-
     if cmd == "search-apps":
-
         page = int(flags.get("--page", "1")) if flags.get("--page", "1").isdigit() else 1
-
         do_search_apps(" ".join(args[1:]), max(1, min(page, 500)))
-
         return 0
-
     if cmd == "app-info":
-
         if len(args) != 2:
-
             raise Fail("usage: app-info <name>")
-
         do_app_info(args[1], {"Arch": flags.get("--arch", ""), "AUR": flags.get("--aur", ""),
-
                               "Flatpak": flags.get("--flatpak", ""), "Snap": flags.get("--snap", "")})
-
         return 0
-
     if cmd == "refresh":
-
         do_refresh()
-
         return 0
-
     if cmd == "market":
-
         do_market("--json" in switches)
-
         return 0
-
     if cmd == "install-market":
-
         if len(args) != 2:
-
             raise Fail("usage: install-market <id>")
-
         do_install_market(args[1])
-
         return 0
-
     if cmd == "update-all":
-
         failed = []
-
         for rec in list(db_load().values()):
-
             if rec.get("kind") == "appimage":
-
                 say(f"   {rec['id']}: an AppImage is kept as it is (import it again to replace it)")
-
                 continue
-
             try:
-
                 step(f"Updating {rec['kind']} '{rec['id']}'")
-
                 do_update(rec["kind"], rec["id"])
-
             except Fail as e:
-
                 say(f"FAIL {rec['id']}: {e}")
-
                 failed.append(rec["id"])
-
         if failed:
-
             raise Fail("not updated: " + ", ".join(failed) + " (each keeps what it had)")
-
         return 0
-
     if cmd == "apply-look":
-
         if len(args) != 2:
-
             raise Fail("usage: apply-look <id> [--piece all|bar|dock|cursor|lock|sleep|sddm]")
-
         piece = flags.get("--piece", "all")
-
         if piece != "all" and piece not in LOOK_PIECES:
-
             raise Fail(f"unknown piece: {piece}")
-
         do_apply_look(args[1], piece)
-
         return 0
-
     if cmd == "check-appimage":
-
         if len(args) != 2:
-
             raise Fail("usage: check-appimage <file>")
-
         do_check_appimage(args[1])
-
         return 0
-
     if cmd == "import-appimage":
-
         if len(args) != 2:
-
             raise Fail("usage: import-appimage <file>")
-
         do_import_appimage(args[1])
-
         return 0
-
     if cmd == "open-appimage":
-
         if len(args) != 2:
-
             raise Fail("usage: open-appimage <file>")
-
         do_open_appimage(args[1])
-
         return 0
-
     if cmd == "gate-pkg":
-
         do_gate_pkg()
-
         return 0
-
     if cmd == "set-appimage-handler":
-
         if len(args) != 1:
-
             raise Fail("usage: set-appimage-handler")
-
         do_set_appimage_handler()
-
         return 0
-
     if cmd not in ("check", "install", "update", "remove") or len(args) != 3 or args[1] not in KINDS:
-
         raise Fail("usage: see aequalyn-store --help")
-
     kind, target = args[1], args[2]
-
     if cmd == "check":
-
         do_check(kind, target, flags.get("--at"), "--market" in switches)
-
     elif cmd == "install":
-
         do_install(kind, target, flags.get("--at"), enable="--no-enable" not in switches)
-
     elif cmd == "update":
-
         do_update(kind, target)
-
     else:
-
         do_remove(kind, target)
-
     return 0
 
 
-
-
-
 if __name__ == "__main__":
-
     try:
-
         sys.exit(main(sys.argv[1:]))
-
     except Fail as e:
-
         print(f"FAIL {e}", file=sys.stderr, flush=True)
-
         sys.exit(1)
-
     except KeyboardInterrupt:
-
         sys.exit(130)

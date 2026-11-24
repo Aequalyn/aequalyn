@@ -1,0 +1,60 @@
+#!/bin/bash
+# aequalyn-lock-info: small lines for the lock screen designs, one per call, safe to
+# show as markup.
+#   binary    the time as dots, hours over minutes (● on, ○ off)
+#   words     the time in words: "ten past eleven"
+#   day       how much of today has gone, as a bar and a percent
+#   battery   the battery as a bar of blocks and a percent, or nothing without one
+#   weather   the sky and the temperature where you are (wttr.in), or nothing
+#   quote     a short line to read, a different one each day
+set -u
+case "${1:-}" in
+    binary)
+        h=$((10#$(date +%H))); m=$((10#$(date +%M)))
+        dots() { local v=$1 n=$2 out="" i; for ((i=n-1; i>=0; i--)); do (( (v >> i) & 1 )) && out+="● " || out+="○ "; done; echo "${out% }"; }
+        echo "$(dots $h 5)"; echo "$(dots $m 6)"
+        ;;
+    words)
+        h=$((10#$(date +%H))); m=$((10#$(date +%M)))
+        n=(twelve one two three four five six seven eight nine ten eleven twelve)
+        r=$(( (m + 2) / 5 * 5 ))
+        (( r == 60 )) && { r=0; h=$((h + 1)); }
+        nx=$(( (h + 1) % 12 )); cur=$(( h % 12 ))
+        case $r in
+            0) echo "${n[$cur]} o'clock" ;;
+            5) echo "five past ${n[$cur]}" ;;   10) echo "ten past ${n[$cur]}" ;;
+            15) echo "quarter past ${n[$cur]}" ;; 20) echo "twenty past ${n[$cur]}" ;;
+            25) echo "twenty-five past ${n[$cur]}" ;; 30) echo "half past ${n[$cur]}" ;;
+            35) echo "twenty-five to ${n[$nx]}" ;; 40) echo "twenty to ${n[$nx]}" ;;
+            45) echo "quarter to ${n[$nx]}" ;; 50) echo "ten to ${n[$nx]}" ;;
+            55) echo "five to ${n[$nx]}" ;;
+        esac
+        ;;
+    day)
+        s=$(( 10#$(date +%H) * 3600 + 10#$(date +%M) * 60 + 10#$(date +%S) ))
+        p=$(( s * 100 / 86400 )); f=$(( p / 5 ))
+        bar=""; for ((i=0; i<20; i++)); do (( i < f )) && bar+="━" || bar+="┄"; done
+        echo "$bar  $p% of today"
+        ;;
+    battery)
+        c=$(cat /sys/class/power_supply/BAT*/capacity 2>/dev/null | head -1)
+        [[ -n "$c" ]] || exit 0
+        st=$(cat /sys/class/power_supply/BAT*/status 2>/dev/null | head -1)
+        f=$(( c / 10 )); bar=""; for ((i=0; i<10; i++)); do (( i < f )) && bar+="▰" || bar+="▱"; done
+        [[ "$st" == Charging ]] && echo "$bar  $c%  charging" || echo "$bar  $c%"
+        ;;
+    weather)
+        cache="${XDG_RUNTIME_DIR:-/tmp}/aequalyn-lock-weather"
+        if [[ ! -s "$cache" || -n "$(find "$cache" -mmin +30 2>/dev/null)" ]]; then
+            curl -sf --max-time 6 'https://wttr.in/?format=%c+%t+·+%C' 2>/dev/null | head -c 120 > "$cache.new" && mv -f "$cache.new" "$cache"
+        fi
+        [[ -s "$cache" ]] && sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' "$cache"
+        ;;
+    quote)
+        q=("Slow is smooth, smooth is fast." "Do one thing, and do it well." "Rest is part of the work."
+           "Small steps, every day." "Make it work, make it right, make it fast." "The best time is now."
+           "Less, but better." "Breathe in. Breathe out. Begin." "Done is better than perfect."
+           "Simple is hard. Hard is worth it." "Leave it better than you found it." "Stay curious.")
+        echo "${q[$(( 10#$(date +%j) % ${#q[@]} ))]}"
+        ;;
+esac

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# aequalyn -- one entry point for the aequalyn-* commands.
+#
+#   aequalyn wallpaper next        -> aequalyn-wallpaper next
+#   aequalyn themes list           -> aequalyn-themes list
+#   aequalyn settings get .wallpaper.mode
+#   aequalyn atelier [themes|wallpapers|rotation|palette]
+#   aequalyn                       list the available commands
+set -euo pipefail
+
+if [[ $# -eq 0 || "$1" == "-h" || "$1" == "--help" ]]; then
+    printf 'usage: aequalyn <command> [args]\n\ncommands:\n'
+    compgen -c aequalyn- | sort -u | sed 's/^aequalyn-/  /'
+    printf '  atelier\n'
+    exit 0
+fi
+
+sub=$1; shift
+if [[ "$sub" == "atelier" ]]; then
+    exec qs ipc call atelier open "${1:-themes}"
+fi
+command -v "aequalyn-$sub" >/dev/null 2>&1 || { printf 'aequalyn: unknown command: %s\n' "$sub" >&2; exit 1; }
+exec "aequalyn-$sub" "$@"

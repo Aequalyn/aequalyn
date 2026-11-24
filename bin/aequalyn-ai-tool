@@ -1,0 +1,472 @@
+#!/usr/bin/env python3
+"""Install and maintain Aequalyn's optional coding-agent command line tools."""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+TOOLS = {
+    "claude": {
+        "name": "Claude Code",
+        "package": "@anthropic-ai/claude-code",
+        "command": "claude",
+        "description": "Anthropic's coding agent for the terminal.",
+    },
+    "codex": {
+        "name": "Codex CLI",
+        "package": "@openai/codex",
+        "command": "codex",
+        "description": "OpenAI's coding agent for the terminal.",
+    },
+    "copilot": {
+        "name": "GitHub Copilot CLI",
+        "package": "@github/copilot",
+        "command": "copilot",
+        "description": "GitHub's coding agent for the terminal.",
+    },
+    "antigravity": {
+        "name": "Antigravity CLI",
+        "package": "",
+        "installer": "official",
+        "command": "agy",
+        "description": "Google's agent-first coding assistant for the terminal.",
+    },
+    "opencode": {
+        "name": "OpenCode",
+        "package": "@opencode/cli",
+        "command": "opencode",
+        "description": "Open source coding agent with support for many model providers.",
+    },
+    "qwen": {
+        "name": "Qwen Code",
+        "package": "@qwen-code/qwen-code",
+        "command": "qwen",
+        "description": "Qwen's terminal coding agent.",
+    },
+    "kilo": {
+        "name": "Kilo Code CLI",
+        "package": "@kilocode/cli",
+        "command": "kilo",
+        "description": "Terminal coding agent with support for many model providers.",
+    },
+    "cline": {
+        "name": "Cline CLI",
+        "package": "cline",
+        "command": "cline",
+        "description": "Cline's interactive and scriptable coding agent for the terminal.",
+    },
+    "crush": {
+        "name": "Crush",
+        "package": "@charmland/crush",
+        "command": "crush",
+        "description": "Charm's open source, multi-provider terminal coding agent.",
+    },
+    "amp": {
+        "name": "Amp CLI",
+        "package": "@ampcode/cli",
+        "command": "amp",
+        "description": "Amp's coding agent for local and remote terminal workspaces.",
+    },
+}
+
+DEFAULT_FILE = Path.home() / ".config/aequalyn/ai-tool-default"
+
+
+def default_tool() -> str:
+    try:
+        value = DEFAULT_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    if value == "gemini":
+        return "antigravity" if available_command_path("antigravity") else ""
+    return value if value in TOOLS else ""
+
+
+def available_command_path(tool_id: str) -> str:
+    path = shutil.which(TOOLS[tool_id]["command"])
+    if path:
+        return path
+    if TOOLS[tool_id].get("installer") == "official":
+        candidate = Path.home() / ".local/bin" / TOOLS[tool_id]["command"]
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return ""
+
+
+def pacman_owner(path: str) -> str:
+    """The Arch package owning a system launcher, or '' when pacman has none."""
+    if not path:
+        return ""
+    try:
+        result = subprocess.run(["pacman", "-Qo", path], capture_output=True, text=True, check=False)
+    except OSError:
+        return ""
+    if result.returncode != 0:
+        return ""
+    line = result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+    marker = " is owned by "
+    if marker not in line:
+        return ""
+    owner = line.split(marker, 1)[1].split()[0]
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@._+-")
+    return owner if owner and all(c in allowed for c in owner) else ""
+
+
+def npm_global_info(path: str) -> tuple[str, str]:
+    """(package, prefix) for a launcher inside a system-wide npm install."""
+    if not path:
+        return "", ""
+    marker = "/lib/node_modules/"
+    resolved = str(Path(path).resolve())
+    if marker not in resolved:
+        return "", ""
+    prefix, tail = resolved.split(marker, 1)
+    if prefix not in ("/usr", "/usr/local"):
+        return "", ""
+    parts = tail.split("/")
+    package = "/".join(parts[:2]) if parts[0].startswith("@") and len(parts) > 1 else parts[0]
+    allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@._+-/")
+    return (package, prefix) if package and all(c in allowed for c in package) else ("", "")
+
+
+def external_management(path: str) -> dict[str, str]:
+    """How a system-wide launcher can be updated and removed, if at all."""
+    owner = pacman_owner(path)
+    if owner:
+        return {"manager": "pacman", "id": owner, "prefix": ""}
+    package, prefix = npm_global_info(path)
+    if package:
+        return {"manager": "npm", "id": package, "prefix": prefix}
+    return {"manager": "", "id": "", "prefix": ""}
+
+
+def set_default_tool(tool_id: str) -> int:
+    if tool_id in ("", "none"):
+        try:
+            DEFAULT_FILE.unlink(missing_ok=True)
+        except OSError as exc:
+            print(f"Could not clear the default AI tool: {exc}", file=sys.stderr)
+            return 1
+        print("No default AI tool selected.")
+        return 0
+    if tool_id not in TOOLS:
+        print(f"Unknown tool {tool_id!r}. Choose one of: {', '.join(TOOLS)}.", file=sys.stderr)
+        return 2
+    if not managed_install(tool_id) and not available_command_path(tool_id):
+        print(f"{TOOLS[tool_id]['name']} is not installed or available on PATH.", file=sys.stderr)
+        return 1
+    try:
+        DEFAULT_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temp = DEFAULT_FILE.with_name(DEFAULT_FILE.name + ".tmp")
+        temp.write_text(tool_id + "\n", encoding="utf-8")
+        temp.replace(DEFAULT_FILE)
+    except OSError as exc:
+        print(f"Could not save the default AI tool: {exc}", file=sys.stderr)
+        return 1
+    print(f"{TOOLS[tool_id]['name']} is now the default AI tool.")
+    return 0
+
+
+def tool_paths(tool_id: str) -> tuple[Path, Path, Path]:
+    home = Path.home()
+    prefix = home / ".local/share/aequalyn/ai-tools" / tool_id
+    executable = prefix / "bin" / TOOLS[tool_id]["command"]
+    launcher = home / ".local/bin" / TOOLS[tool_id]["command"]
+    return prefix, executable, launcher
+
+
+def managed_package(tool_id: str) -> bool:
+    prefix, executable, _ = tool_paths(tool_id)
+    package_json = prefix / "lib/node_modules" / TOOLS[tool_id]["package"] / "package.json"
+    return (
+        package_json.is_file()
+        and executable.exists()
+        and os.access(executable, os.X_OK)
+    )
+
+
+def managed_link(tool_id: str) -> bool:
+    _, executable, launcher = tool_paths(tool_id)
+    return launcher.is_symlink() and launcher.resolve(strict=False) == executable.resolve(strict=False)
+
+
+def managed_install(tool_id: str) -> bool:
+    return managed_package(tool_id) and managed_link(tool_id)
+
+
+def installed_version(tool_id: str) -> str:
+    prefix, _, _ = tool_paths(tool_id)
+    package_json = prefix / "lib/node_modules" / TOOLS[tool_id]["package"] / "package.json"
+    try:
+        return str(json.loads(package_json.read_text(encoding="utf-8")).get("version", ""))
+    except (OSError, json.JSONDecodeError):
+        return ""
+
+
+def list_tools(as_json: bool) -> int:
+    rows = []
+    for tool_id, tool in TOOLS.items():
+        _, _, launcher = tool_paths(tool_id)
+        owned = managed_install(tool_id)
+        collision = (launcher.exists() or launcher.is_symlink()) and not managed_link(tool_id)
+        elsewhere = available_command_path(tool_id)
+        external = external_management(elsewhere) if elsewhere and not owned else {
+            "manager": "", "id": "", "prefix": ""
+        }
+        row = {
+            "id": tool_id,
+            "name": tool["name"],
+            "package": tool["package"],
+            "command": tool["command"],
+            "description": tool["description"],
+            "installed": owned,
+            "version": installed_version(tool_id) if owned else "",
+            "availableElsewhere": bool(elsewhere) and not owned,
+            "availablePath": elsewhere if elsewhere and not owned else "",
+            "systemManager": external["manager"],
+            "systemId": external["id"],
+            "systemPrefix": external["prefix"],
+            "launcherConflict": collision and not owned,
+            "default": tool_id == default_tool(),
+        }
+        rows.append(row)
+    if as_json:
+        print(json.dumps(rows, ensure_ascii=False))
+        return 0
+    for row in rows:
+        state = f"installed {row['version']}" if row["installed"] else (
+            f"available at {row['availablePath']}" if row["availableElsewhere"] else "not installed"
+        )
+        marker = " (default)" if row["default"] else ""
+        print(f"{row['id']:<8} {row['name']:<22} {state}{marker}")
+    return 0
+
+
+def run_command(args: list[str], label: str = "command") -> int:
+    try:
+        process = subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+    except OSError as exc:
+        print(f"Could not run {label}: {exc}", file=sys.stderr)
+        return 127
+    assert process.stdout is not None
+    for line in process.stdout:
+        print(line, end="", flush=True)
+    return process.wait()
+
+
+def run_npm(args: list[str]) -> int:
+    return run_command(args, "npm")
+
+
+def external_tool_action(action: str, tool_id: str, external: dict[str, str]) -> int:
+    """Update or remove a launcher owned by pacman or a system-wide npm install."""
+    tool = TOOLS[tool_id]
+    manager, ident, prefix = external["manager"], external["id"], external["prefix"]
+    if manager == "pacman":
+        args = ["pacman", "-S", "--needed", ident] if action == "update" else ["pacman", "-Rns", ident]
+    elif manager == "npm":
+        if action == "update":
+            args = ["npm", "install", "--global", "--prefix", prefix, "--no-audit", "--no-fund",
+                    "--ignore-scripts=false", f"--allow-scripts={ident}", ident + "@latest"]
+        else:
+            args = ["npm", "uninstall", "--global", "--prefix", prefix,
+                    "--no-audit", "--no-fund", ident]
+    else:
+        print(f"{tool['name']} is installed outside Aequalyn and cannot be managed here.", file=sys.stderr)
+        return 1
+    if os.geteuid() != 0:
+        if not shutil.which("sudo"):
+            print("sudo is required to change a system-wide AI tool.", file=sys.stderr)
+            return 1
+        args = ["sudo", *args]
+    result = run_command(args, manager)
+    if result == 0 and action == "remove" and default_tool() == tool_id:
+        try:
+            DEFAULT_FILE.unlink(missing_ok=True)
+        except OSError as exc:
+            print(f"Removed {tool['name']}, but could not clear its default selection: {exc}", file=sys.stderr)
+            return 1
+    if result == 0:
+        verb = "Updated" if action == "update" else "Removed"
+        print(f"{verb} {tool['name']} from its system installation.")
+    return result
+
+
+def npm_command() -> list[str] | None:
+    if shutil.which("node") and shutil.which("npm"):
+        return ["npm"]
+    mise = shutil.which("mise")
+    if mise:
+        # Keep installer behavior independent of shell startup files and the
+        # caller's project directory; mise provides a Node LTS runtime for npm.
+        return [mise, "exec", "-C", str(Path.home()), "node@lts", "--", "npm"]
+    return None
+
+
+def install_official_cli(tool: dict[str, str]) -> int:
+    result = run_npm([
+        "bash", "-o", "pipefail", "-c",
+        "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+    ])
+    if result != 0:
+        return result
+    if not available_command_path("antigravity"):
+        print(f"Installer finished, but {tool['command']} is not available in ~/.local/bin.", file=sys.stderr)
+        return 1
+    print(f"{tool['name']} is ready as {tool['command']}.")
+    print("Run it in a terminal to sign in with Google.")
+    return 0
+
+
+def change_tool(action: str, tool_id: str) -> int:
+    tool = TOOLS[tool_id]
+    prefix, executable, launcher = tool_paths(tool_id)
+    owned = managed_install(tool_id)
+
+    # A tool in /usr/bin still has a real owner: an Arch package or a global
+    # npm install. Use that owner instead of refusing just because Aequalyn did
+    # not install it itself.
+    if not owned and action in ("update", "remove"):
+        external = external_management(available_command_path(tool_id))
+        if external["manager"]:
+            return external_tool_action(action, tool_id, external)
+
+    if action == "remove":
+        if not managed_package(tool_id):
+            print(f"{tool['name']} is not installed by Aequalyn.", file=sys.stderr)
+            return 1
+        npm = npm_command()
+        if npm:
+            npm_args = [*npm, "uninstall", "--global", "--prefix", str(prefix),
+                        "--no-audit", "--no-fund", tool["package"]]
+            result = run_npm(npm_args)
+            if result != 0:
+                return result
+        else:
+            # npm can be removed after install; the managed tree is ours, so
+            # delete it directly instead of leaving a tool nobody can remove.
+            try:
+                shutil.rmtree(prefix)
+            except OSError as exc:
+                print(f"Could not remove {tool['name']}: {exc}", file=sys.stderr)
+                return 1
+            print("Node.js/npm was unavailable; removed the managed files directly.")
+        if managed_link(tool_id):
+            launcher.unlink()
+        if default_tool() == tool_id:
+            try:
+                DEFAULT_FILE.unlink(missing_ok=True)
+            except OSError as exc:
+                print(f"Removed {tool['name']}, but could not clear its default selection: {exc}", file=sys.stderr)
+                return 1
+        print(f"Removed {tool['name']}. Its settings and sign-in data were kept.")
+        return 0
+
+    if action == "update" and not owned:
+        print(f"{tool['name']} is not installed by Aequalyn; install it first.", file=sys.stderr)
+        return 1
+
+    if tool.get("installer") == "official":
+        if action != "install":
+            print(f"{tool['name']} is installed by Google's installer and is not managed by Aequalyn.", file=sys.stderr)
+            return 1
+        return install_official_cli(tool)
+
+    if not owned:
+        if managed_package(tool_id):
+            if (launcher.exists() or launcher.is_symlink()) and not managed_link(tool_id):
+                print(f"Refusing to replace the existing file {launcher}.", file=sys.stderr)
+                return 1
+            launcher.parent.mkdir(parents=True, exist_ok=True)
+            if not managed_link(tool_id):
+                launcher.symlink_to(executable)
+            print(f"Reconnected {tool['name']} as {tool['command']}.")
+            return 0
+        existing = shutil.which(tool["command"])
+        if existing:
+            print(
+                f"{tool['command']} is already available at {existing}. "
+                "Aequalyn will not replace another installation.",
+                file=sys.stderr,
+            )
+            return 1
+        if (launcher.exists() or launcher.is_symlink()) and not managed_link(tool_id):
+            print(f"Refusing to replace the existing file {launcher}.", file=sys.stderr)
+            return 1
+
+    npm = npm_command()
+    if not npm:
+        print(
+            "Node.js/npm or mise is required. Install mise or the nodejs and npm "
+            "packages from Aequalyn's Store, then try again.",
+            file=sys.stderr,
+        )
+        return 1
+
+    prefix.mkdir(parents=True, exist_ok=True)
+    package = tool["package"] + "@latest"
+    # npm 12 blocks lifecycle scripts unless the package is explicitly allowed;
+    # Claude Code and several other agents need postinstall to fetch their
+    # native binary, so allowing just this package keeps the install usable.
+    npm_args = [*npm, "install", "--global", "--prefix", str(prefix),
+                "--no-audit", "--no-fund", "--ignore-scripts=false",
+                f"--allow-scripts={tool['package']}", package]
+    result = run_npm(npm_args)
+    if result != 0:
+        return result
+
+    if not executable.is_file() or not os.access(executable, os.X_OK):
+        print(f"Install finished, but expected command {executable} was not created.", file=sys.stderr)
+        return 1
+
+    launcher.parent.mkdir(parents=True, exist_ok=True)
+    if managed_link(tool_id):
+        pass
+    elif launcher.exists() or launcher.is_symlink():
+        print(f"Refusing to replace the existing file {launcher}.", file=sys.stderr)
+        return 1
+    else:
+        launcher.symlink_to(executable)
+    print(f"{tool['name']} is ready as {tool['command']}.")
+    print("Run it in a terminal to sign in with the provider.")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print("Usage: aequalyn-ai-tool list [--json] | install|update|remove TOOL | set-default TOOL|none | get-default")
+        return 0
+    if argv[0] == "list" and len(argv) in (1, 2) and (len(argv) == 1 or argv[1] == "--json"):
+        return list_tools(as_json=len(argv) == 2)
+    if argv[0] == "set-default" and len(argv) == 2:
+        return set_default_tool(argv[1])
+    if argv[0] == "get-default" and len(argv) == 1:
+        print(default_tool())
+        return 0
+    if argv[0] in ("install", "update", "remove") and len(argv) == 2:
+        if argv[1] not in TOOLS:
+            print(f"Unknown tool {argv[1]!r}. Choose one of: {', '.join(TOOLS)}.", file=sys.stderr)
+            return 2
+        return change_tool(argv[0], argv[1])
+    print("Usage: aequalyn-ai-tool list [--json] | install|update|remove TOOL | set-default TOOL|none | get-default", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        print("\nCancelled.", file=sys.stderr)
+        sys.exit(130)

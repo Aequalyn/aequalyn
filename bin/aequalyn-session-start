@@ -1,295 +1,148 @@
 #!/usr/bin/env bash
-
 # aequalyn-session-start -- Hyprland autostart glue for the Aequalyn desktop.
-
 # Called from hyprland.lua via hl.on("hyprland.start") and, on the live ISO,
-
 # from aequalyn-live-login once the Hyprland/Wayland sockets exist. Safe to
-
 # call twice: the watchdog's start is idempotent and every other step is safe to
-
 # repeat.
-
 set -u
-
 # ~/.local/bin first, once: this runs again on every shell restart, with the PATH it
-
 # left behind
-
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
 
-
-
 # Ensure agent skill folders (.agents, .claude, ...) exist so AI assistants
-
 # can load Aequalyn's SKILL.md. Idempotent.
-
 mkdir -p "$HOME/.agents/skills" "$HOME/.claude/skills" "$HOME/.codex/skills" "$HOME/.pi/agent/skills" "$HOME/.gemini/config/skills" "$HOME/.hermes/skills" 2>/dev/null || true
-
 if command -v aequalyn-provision-user >/dev/null 2>&1; then
-
     aequalyn-provision-user >/dev/null 2>&1 || true
-
 fi
-
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
-
-
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/aequalyn"
-
 SESSION_LOG="$STATE_DIR/session.log"
-
 log() { printf '[aequalyn-session] %s\n' "$*" >> "$SESSION_LOG" 2>/dev/null || true; }
-
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
-
-
 # 1. Desktop services (Polkit, portals, keyring)
-
 if command -v systemctl >/dev/null 2>&1; then
-
     # hyprpolkitagent SIGSEGVs on some GPUs (notably virtio-gpu VMs) when it
-
     # renders its password dialog, which breaks pkexec completely. Prefer
-
     # polkit-gnome's GTK agent, which renders fine there; fall back to
-
     # hyprpolkitagent only when polkit-gnome is not installed.
-
     POLKIT_AGENT=/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
-
     if [[ -x "$POLKIT_AGENT" ]]; then
-
         systemctl --user stop hyprpolkitagent.service >/dev/null 2>&1 || true
-
         if ! pgrep -f "^$POLKIT_AGENT$" >/dev/null 2>&1; then
-
             setsid "$POLKIT_AGENT" >/dev/null 2>&1 &
-
             log "started polkit-gnome authentication agent"
-
         fi
-
     else
-
         systemctl --user start hyprpolkitagent.service >/dev/null 2>&1 || true
-
     fi
-
     systemctl --user start xdg-desktop-portal-hyprland.service >/dev/null 2>&1 || true
-
     systemctl --user start xdg-desktop-portal-gtk.service     >/dev/null 2>&1 || true
-
 fi
-
-
 
 # A leftover hyprpaper from a previous Hyprland setup would fight awww for the
-
 # background layer (and keep an old wallpaper on screen). Aequalyn owns wallpapers.
-
 if pgrep -x hyprpaper >/dev/null 2>&1; then
-
     pkill -x hyprpaper 2>/dev/null || true
-
     log "stopped leftover hyprpaper"
-
 fi
-
-
 
 # 2. Wallpaper daemon
-
 if command -v awww-daemon >/dev/null 2>&1; then
-
     pgrep -x awww-daemon >/dev/null 2>&1 || { awww-daemon >/dev/null 2>&1 & }
-
     sleep 0.5
-
 fi
-
-
 
 # 3. Restore what was showing: an image, a theme background or a live video,
-
 #    on every output. aequalyn-wallpaper regenerates the systemwide palette
-
 #    only when colours follow the wallpaper (a fixed theme re-applies itself
-
 #    when the shell starts).
-
 if command -v aequalyn-wallpaper >/dev/null 2>&1; then
-
     aequalyn-wallpaper restore >/dev/null 2>&1 || log "wallpaper restore failed"
-
 elif command -v aequalyn-theme >/dev/null 2>&1; then
-
     aequalyn-theme >/dev/null 2>&1 || log "aequalyn-theme failed"
-
 fi
-
-
 
 # 3b. Aequalyn FM: a fresh home -- an install's, or the live ISO's -- carries
-
 #     the plugin but no desktop entry for it until something registers it,
-
 #     and until then the app menu cannot list it and the dock cannot pin it.
-
 #     Register it the moment its entry is missing; the choices the installer
-
 #     makes on top of it (folders open with it, it answers every app's
-
 #     open/save dialog) are never made here. Cheap, and never again once the
-
 #     entry exists.
-
 FM_BIN="$XDG_CONFIG_HOME/quickshell/plugins/aequalynfm/bin/aequalyn-fm"
-
 FM_ENTRY="$HOME/.local/share/applications/aequalyn.fm.desktop"
-
 if [[ -x "$FM_BIN" && ! -f "$FM_ENTRY" ]]; then
-
     "$FM_BIN" --install >/dev/null 2>&1 && log "registered Aequalyn FM (its menu entry)" \
-
                                          || log "could not register Aequalyn FM"
-
 fi
-
-
 
 # 4. The shell itself (QuickShell auto-reloads on config changes), under the
-
 #    watchdog: aequalyn-watchdog runs qs, restarts it if it crashes, hangs
-
 #    (an unanswered heartbeat) or outgrows its memory budget, and runs the
-
 #    plugins marked `sandbox: true` out of process, so a failing plugin can
-
 #    only take itself down. `start` is idempotent -- a second call finds the
-
 #    control socket and exits -- and it adopts an already-running shell
-
 #    rather than replacing it.
-
 #    Point the watchdog at the config dir explicitly: on the live ISO the
-
 #    launcher and Hyprland's executor can disagree about XDG_CONFIG_HOME, in
-
 #    which case qs silently finds no configuration at all. Its output is
-
 #    kept in the log so a QML/load failure is diagnosable.
-
 QS_CONFIG="$XDG_CONFIG_HOME/quickshell"
-
 if command -v aequalyn-watchdog >/dev/null 2>&1; then
-
     # On the live ISO two callers reach this at once: hyprland.lua's
-
     # hyprland.start hook and aequalyn-live-session's start_shell. Serialise
-
     # them with flock so exactly one supervisor is ever started.
-
     QS_LOCK="$XDG_RUNTIME_DIR/aequalyn-quickshell-start.lock"
-
     if exec 8>"$QS_LOCK" 2>/dev/null; then
-
         if flock -n 8; then
-
             # 8>&- : the daemon must not inherit the lock fd, or the
-
             # flock would stay held after this script exits.
-
             if aequalyn-watchdog start >>"$SESSION_LOG" 2>&1 8>&-; then
-
                 log "watchdog started (shell config $QS_CONFIG)"
-
             elif aequalyn-watchdog status >/dev/null 2>&1; then
-
                 # "start" gave up waiting, but the daemon did come up after
-
                 # all: it owns the shell, and a fallback spawned now would
-
                 # only be refused as a duplicate (or worse, win the race and
-
                 # leave the desktop unsupervised, with the root gate refusing
-
                 # everything it asks for).
-
                 log "the watchdog came up after all; it owns the shell"
-
             elif pgrep -x qs >/dev/null 2>&1; then
-
                 log "a shell is already running; the watchdog will adopt it"
-
             else
-
                 log "watchdog failed to start; launching the shell unsupervised"
-
                 qs -n -d -p "$QS_CONFIG" 8>&- >>"$SESSION_LOG" 2>&1 || log "quickshell failed to start"
-
             fi
-
         else
-
             log "another session-start is launching the shell; skipping"
-
         fi
-
         exec 8>&-
-
     else
-
         log "cannot open $QS_LOCK; starting the watchdog without the guard"
-
         aequalyn-watchdog start >>"$SESSION_LOG" 2>&1 || log "watchdog failed to start"
-
     fi
-
 elif command -v qs >/dev/null 2>&1; then
-
     log "aequalyn-watchdog not found; launching the shell unsupervised"
-
     qs -n -d -p "$QS_CONFIG" >>"$SESSION_LOG" 2>&1 || log "quickshell failed to start"
-
 else
-
     log "neither aequalyn-watchdog nor qs found in PATH"
-
 fi
-
-
 
 # 5. Idle / lock -- aequalyn-idle generates the hypridle config from the user's
-
 #    Power settings (lock / display-off / suspend can each be disabled).
-
 if command -v aequalyn-idle >/dev/null 2>&1; then
-
     aequalyn-idle >/dev/null 2>&1 || log "aequalyn-idle failed"
-
 elif command -v hypridle >/dev/null 2>&1; then
-
     pgrep -x hypridle >/dev/null 2>&1 || hypridle >/dev/null 2>&1 &
-
 fi
-
-
 
 # Load the optional floating titlebar plugin only after Hyprland and the shell
-
 # are fully up. Loading it earlier (config parse / startup) crashes Hyprland.
-
 if [ -f "$HOME/.local/lib/aequalyn/hyprbars.so" ]; then
-
     ( sleep 10; hyprctl plugin load "$HOME/.local/lib/aequalyn/hyprbars.so" >/dev/null 2>&1; sleep 1; hyprctl eval "_G.aequalyn_floating.load_decorations()" >/dev/null 2>&1; sleep 1; aequalyn-shell-restart >/dev/null 2>&1 ) &
-
 fi
-
-
 
 log "session started at $(date '+%F %T')"

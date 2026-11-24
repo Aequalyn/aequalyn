@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# aequalyn-qt5-dialogs -- keep the open and save dialogs of the desktop's qt5
+# apps on the portal: the same fm window every gtk and qt6 app uses.
+#
+# vlc is a qt5 app, and the one this knows about. the session tells qt6 where
+# its dialogs come from (QT_QPA_PLATFORMTHEME=qt6ct, whose standard_dialogs
+# ask the portal that aequalyn fm answers), but qt5 knows none of that name
+# and serves its own grey box. qt5-base ships its own portal theme, so two
+# small things bring an app to the fm dialog: a wrapper in ~/.local/bin that
+# points it at that theme (also what a terminal gets, ~/.local/bin is ahead
+# of /usr/bin on PATH), and a desktop entry in ~/.local/share/applications
+# that points at the wrapper -- launchers resolve Exec's bare name through
+# /usr/bin, not the person's PATH, so the entry has to name the wrapper
+# outright. the entry is generated from the app's own system file, so an
+# upgrade that changes its Exec line is picked up the next time this runs.
+#
+# this runs from two places: a pacman hook fires it whenever the app's
+# package is installed, upgraded or removed (so a vlc installed months after
+# the system gets the fm dialog the moment pacman finishes, with no update
+# or migration in sight), and migration 20261118-3 brings that hook to
+# installs that predate it. both call this as root; nothing here needs root
+# beyond the chowns, so the tests below run it as a user.
+#
+#   aequalyn-qt5-dialogs               patch every aequalyn user's home, or
+#                                      take back what was patched once an app
+#                                      is gone; never touch a person's own
+#                                      files
+#   aequalyn-qt5-dialogs --install-hook
+#                                      write the pacman hook that runs this
+#                                      on the app's installs and removals
+#
+# env for tests: AEQUALYN_MIGRATION_HOMES="h1 h2" (in place of every home),
+# AEQUALYN_QT5_DESKTOP_DIR=dir (in place of /usr/share/applications; an
+# empty dir is what "the app is gone" looks like to this) and
+# AEQUALYN_QT5_HOOK_DIR=dir (in place of /etc/pacman.d/hooks).
+
+set -uo pipefail
+
+MARKER='X-Aequalyn-Generated=qt5-dialogs'
+DESKTOP_DIR=${AEQUALYN_QT5_DESKTOP_DIR:-/usr/share/applications}
+HOOK_DIR=${AEQUALYN_QT5_HOOK_DIR:-/etc/pacman.d/hooks}
+# the qt5 apps whose dialogs this keeps on the portal, space separated. a
+# future qt5 app gets a name here and everything below is the same.
+APPS="vlc"
+
+info() { printf '\033[0;34m[qt5-dialogs]\033[0m %s\n' "$*"; }
+ok()   { printf '\033[0;32m[qt5-dialogs]\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[qt5-dialogs]\033[0m %s\n' "$*"; }
+
+# a dir under a person's home, made with their ownership when this runs as
+# root: root-made dirs there would shut the person out of their own files
+ensure_dir() { # path uid:gid
+    [[ -d $1 ]] && return 0
+    if [[ $EUID -eq 0 ]]; then
+        install -d -m 755 -o "${2%%:*}" -g "${2##*:}" "$1"
+    else
+        mkdir -p "$1"
+    fi
+}
+
+# a file's ownership goes to the home's owner when this runs as root; as the
+# user it is already right
+own() { # file uid:gid
+    [[ $EUID -eq 0 ]] && chown "$2" "$1" 2>/dev/null || true
+}
+
+wrapper_for() { # app -- the wrapper's whole content
+    cat <<EOF
+#!/bin/sh
+# $1 -- a qt5 app in a qt6 world: the session tells qt6 where its dialogs
+# come from (QT_QPA_PLATFORMTHEME=qt6ct, whose standard_dialogs ask the
+# portal that aequalyn fm answers), but qt5 knows none of that name and
+# serves its own grey box. qt5-base ships its own portal theme: point the
+# app at it, so its open and save dialogs come from the same fm window
+# every other app uses. aequalyn-qt5-dialogs wrote this; it is yours.
+export QT_QPA_PLATFORMTHEME=xdgdesktopportal
+exec /usr/bin/$1 "\$@"
+EOF
+}
+
+# the pacman hook, verbatim: it fires this engine whenever the app's package
+# arrives, moves on or leaves. the engine tells applied from cleaned apart
+# by looking for the app's system entry, so one hook serves all three
+hook_body() {
+    cat <<'EOF'
+# Aequalyn: whenever the qt5 app arrives, moves on or leaves, keep its open
+# and save dialogs on the portal -- the fm window every other app uses.
+# Written by aequalyn-qt5-dialogs --install-hook; migration 20261118-3.
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Type = Package
+Target = vlc
+Target = vlc-gui-qt
+
+[Action]
+Description = Aequalyn: the qt5 app's dialogs on the portal
+When = PostTransaction
+Exec = /usr/share/aequalyn/bin/aequalyn-qt5-dialogs
+EOF
+}
+
+install_hook() {
+    mkdir -p "$HOOK_DIR" 2>/dev/null || { warn "cannot write $HOOK_DIR (not root?)"; return 1; }
+    local tmp="$HOOK_DIR/.aequalyn-qt5-dialogs.hook.$$"
+    hook_body > "$tmp" || return 1
+    if cmp -s "$tmp" "$HOOK_DIR/aequalyn-qt5-dialogs.hook"; then
+        rm -f "$tmp"
+        ok "the pacman hook is already in place"
+    else
+        mv "$tmp" "$HOOK_DIR/aequalyn-qt5-dialogs.hook"
+        chmod 644 "$HOOK_DIR/aequalyn-qt5-dialogs.hook"
+        ok "pacman hook written to $HOOK_DIR/aequalyn-qt5-dialogs.hook"
+    fi
+}
+
+# one home, one app. 0 when something was written or taken back, 1 when
+# there was nothing to do
+patch_home() { # home app
+    local home=$1 app=$2
+    [[ -d $home/.config/quickshell ]] || return 1
+    local uidgid owner wrap apps entry sys gen
+    uidgid=$(stat -c '%u:%g' "$home" 2>/dev/null) || return 1
+    wrap="$home/.local/bin/$app"
+    apps="$home/.local/share/applications"
+    entry="$apps/$app.desktop"
+    sys="$DESKTOP_DIR/$app.desktop"
+
+    # the app is gone: take back what was ours, keep anything the person
+    # wrote themselves
+    if [[ ! -f $sys ]]; then
+        local took=0
+        if [[ -f $entry ]] && grep -q "^$MARKER\$" "$entry"; then
+            rm -f "$entry"
+            took=1
+        fi
+        if [[ -f $wrap ]] && wrapper_for "$app" | cmp -s - "$wrap"; then
+            rm -f "$wrap"
+            took=1
+        fi
+        if (( took )); then
+            [[ -d $apps ]] && update-desktop-database -q "$apps" 2>/dev/null
+            ok "$app left $home; its patch went with it"
+        fi
+        return $(( 1 - took ))
+    fi
+
+    # the wrapper. a file that is not this one's own writing is the
+    # person's: leave it and say so, the portal env may well be theirs too
+    ensure_dir "$home/.local/bin" "$uidgid"
+    gen=$(mktemp)
+    wrapper_for "$app" > "$gen"
+    if [[ ! -f $wrap ]]; then
+        mv "$gen" "$wrap"
+        chmod 755 "$wrap"
+        own "$wrap" "$uidgid"
+        ok "wrote $wrap"
+    elif cmp -s "$gen" "$wrap"; then
+        rm -f "$gen"
+    else
+        rm -f "$gen"
+        warn "$wrap is not ours to touch; left as it is"
+    fi
+
+    # the desktop entry, generated from the app's own file so an upgrade's
+    # changes flow through: the marker goes on the second line, where the
+    # entry's own section begins
+    if [[ -f $entry ]] && ! grep -q "^$MARKER\$" "$entry"; then
+        warn "$entry is the person's own; left as it is"
+        return 1
+    fi
+    ensure_dir "$apps" "$uidgid"
+    gen=$(mktemp)
+    awk -v m="$MARKER" 'NR == 1 { print; print m; next } { print }' "$sys" \
+        | sed -E "s#^(Exec=)(/usr/bin/)?$app( |\$)#\1$wrap\3#" > "$gen"
+    if cmp -s "$gen" "$entry"; then
+        rm -f "$gen"
+        return 1
+    fi
+    mv "$gen" "$entry"
+    chmod 644 "$entry"
+    own "$entry" "$uidgid"
+    [[ -d $apps ]] && update-desktop-database -q "$apps" 2>/dev/null
+    ok "wrote $entry (the bar shows it after its next scan)"
+    return 0
+}
+
+homes=()
+if [[ -n ${AEQUALYN_MIGRATION_HOMES:-} ]]; then
+    read -r -a homes <<< "$AEQUALYN_MIGRATION_HOMES"
+else
+    homes=(/home/* /root)
+fi
+
+case ${1:-} in
+    --install-hook)
+        install_hook
+        ;;
+    --help|-h)
+        sed -n '2,31s/^# \{0,1\}//p' "${BASH_SOURCE[0]}"
+        ;;
+    "")
+        touched=0
+        for home in "${homes[@]}"; do
+            [[ -d $home ]] || continue
+            for app in $APPS; do
+                patch_home "$home" "$app" && touched=$((touched + 1))
+            done
+        done
+        [[ $touched -eq 0 ]] && ok "nothing to do" || true
+        ;;
+    *)
+        echo "usage: aequalyn-qt5-dialogs [--install-hook]" >&2
+        exit 1
+        ;;
+esac

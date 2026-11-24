@@ -1,0 +1,224 @@
+#!/usr/bin/env bash
+# aequalyn-themes -- folder themes: a palette plus a set of backgrounds.
+#
+# Usage:
+#   aequalyn-themes list [--json]          every installed folder theme
+#   aequalyn-themes current                id of the active folder theme (if any)
+#   aequalyn-themes set <id> [--from-shell] [--no-background]
+#                                          activate a theme: palette + background
+#                                          (--no-background: its colours only)
+#   aequalyn-themes clear                  forget the active folder theme
+#   aequalyn-themes backgrounds [id]       background images of a theme
+#   aequalyn-themes install <git-url|dir>  add a theme to ~/.config/aequalyn/themes
+#   aequalyn-themes remove <id>            delete a user-installed theme
+#
+# A theme is a directory named after its id:
+#
+#   <id>/theme.json      {"name", "family", "author", "variant": "dark|light",
+#                         "palette": {bgBase, bgSurface, ... accentRed}}
+#   <id>/colors.toml     colours from a colors.toml (used when theme.json has no palette)
+#   <id>/backgrounds/    images or videos, applied in name order
+#   <id>/preview.png     optional card image for the picker
+#
+# A theme with backgrounds but no palette is a *wallpaper pack*: its colours
+# come from the active background through matugen.
+#
+# Lookup order (a later directory overrides an earlier one with the same id):
+#   /usr/share/aequalyn/themes  ~/.local/share/aequalyn/themes  ~/.config/aequalyn/themes
+set -euo pipefail
+
+CONF="${XDG_CONFIG_HOME:-$HOME/.config}"
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
+USER_DIR="$CONF/aequalyn/themes"
+CURRENT="$CONF/aequalyn/current/theme"
+THEME_DIRS=(/usr/share/aequalyn/themes "$DATA/aequalyn/themes" "$USER_DIR")
+MEDIA_RE='.*\.(jpe?g|png|webp|bmp|gif|mp4|webm|mkv|mov)$'
+
+die() { printf 'aequalyn-themes: %s\n' "$*" >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || die "jq is required"
+
+# theme_dirs -> "id<TAB>dir" lines, later roots override earlier ones
+theme_dirs() {
+    local root d
+    declare -A seen=()
+    local order=()
+    for root in "${THEME_DIRS[@]}"; do
+        [[ -d "$root" ]] || continue
+        for d in "$root"/*/; do
+            [[ -d "$d" ]] || continue
+            d=${d%/}
+            local id=${d##*/}
+            [[ -z "${seen[$id]+x}" ]] && order+=("$id")
+            seen[$id]=$d
+        done
+    done
+    local id
+    for id in "${order[@]}"; do printf '%s\t%s\n' "$id" "${seen[$id]}"; done | sort -f
+}
+
+find_theme() { # find_theme <id> -> dir
+    local id dir
+    while IFS=$'\t' read -r id dir; do
+        [[ "$id" == "$1" ]] && { printf '%s' "$dir"; return 0; }
+    done < <(theme_dirs)
+    return 1
+}
+
+backgrounds_of() { # backgrounds_of <dir>
+    [[ -d "$1/backgrounds" ]] || return 0
+    find -L "$1/backgrounds" -maxdepth 1 -type f -regextype posix-extended -iregex "$MEDIA_RE" | sort -V
+}
+
+pretty() { # tokyo-night -> Tokyo Night
+    printf '%s' "$1" | sed -E 's/[-_]+/ /g; s/\b(.)/\u\1/g'
+}
+
+# colors.toml: key = "#rrggbb" lines -> {"key": "#rrggbb", ...}
+toml_colors() {
+    sed -n -E 's/^[[:space:]]*([A-Za-z0-9_]+)[[:space:]]*=[[:space:]]*"(#[0-9A-Fa-f]{6})".*/\1\t\2/p' "$1" \
+        | jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): .[1]}) | add // {}'
+}
+
+theme_json() { # theme_json <id> <dir>
+    local id=$1 dir=$2 meta='{}' colors='null' bgs preview=""
+    [[ -f "$dir/theme.json" ]] && meta=$(jq -c . "$dir/theme.json" 2>/dev/null || echo '{}')
+    [[ -f "$dir/colors.toml" ]] && colors=$(toml_colors "$dir/colors.toml")
+    bgs=$(backgrounds_of "$dir" | jq -R -s 'split("\n") | map(select(length > 0))')
+    for f in preview.png preview.jpg preview.webp; do
+        [[ -f "$dir/$f" ]] && { preview="$dir/$f"; break; }
+    done
+    jq -n -c \
+        --arg id "$id" --arg dir "$dir" --arg pretty "$(pretty "$id")" --arg preview "$preview" \
+        --argjson meta "$meta" --argjson colors "$colors" --argjson bgs "$bgs" '
+        {
+          id: $id,
+          dir: $dir,
+          name: ($meta.name // $pretty),
+          family: ($meta.family // (if $colors != null then "Folder" else "Aequalyn" end)),
+          author: ($meta.author // ""),
+          variant: ($meta.variant // ""),
+          palette: ($meta.palette // null),
+          colors: $colors,
+          backgrounds: $bgs,
+          preview: (if $preview != "" then $preview else ($bgs[0] // "") end),
+          kind: (if ($meta.palette // $colors) == null then "pack" else "theme" end)
+        }'
+}
+
+cmd_list() {
+    local json=0 id dir
+    [[ "${1:-}" == "--json" ]] && json=1
+    if [[ $json -eq 1 ]]; then
+        { while IFS=$'\t' read -r id dir; do theme_json "$id" "$dir"; done < <(theme_dirs); } | jq -s -c .
+    else
+        while IFS=$'\t' read -r id dir; do printf '%-24s %s\n' "$id" "$dir"; done < <(theme_dirs)
+    fi
+}
+
+cmd_current() {
+    [[ -L "$CURRENT" || -d "$CURRENT" ]] || return 0
+    basename "$(readlink -f "$CURRENT")"
+}
+
+cmd_set() {
+    local id=${1:-} from_shell=0 no_bg=0 dir first a
+    [[ -n "$id" ]] || die "usage: set <id> [--from-shell] [--no-background]"
+    for a in "${@:2}"; do
+        case "$a" in
+            --from-shell) from_shell=1 ;;
+            --no-background) no_bg=1 ;;
+        esac
+    done
+    dir=$(find_theme "$id") || die "no such theme: $id"
+    mkdir -p "$(dirname "$CURRENT")"
+    ln -sfn "$dir" "$CURRENT"
+
+    # Recolour the shell (it writes theme.conf and the compositor colours).
+    # A palette-less pack switches the shell to wallpaper colours instead.
+    # When the shell is running it takes over from here (it writes
+    # theme.conf, then calls back with --from-shell for the background).
+    if [[ $from_shell -eq 0 ]] && command -v qs >/dev/null 2>&1 \
+        && [[ "$(qs ipc call theme set "$id" 2>/dev/null)" == "true" ]]; then
+        return 0
+    fi
+    if [[ $from_shell -eq 0 ]]; then
+        # No shell: record the choice so it applies on the next start.
+        local conf="theme:$id"
+        [[ -f "$dir/theme.json" ]] && jq -e '.palette' "$dir/theme.json" >/dev/null 2>&1 || [[ -f "$dir/colors.toml" ]] || conf=wallpaper
+        mkdir -p "$CONF/quickshell"
+        printf '%s' "$conf" > "$CONF/quickshell/theme.conf"
+    fi
+
+    # Background: keep the current one if it already belongs to this theme
+    # (re-selecting a theme should not reshuffle), otherwise the first one.
+    first=$(backgrounds_of "$dir" | head -n1)
+    if [[ $no_bg -eq 0 && -n "$first" ]] && command -v aequalyn-wallpaper >/dev/null 2>&1; then
+        local cur
+        cur=$(cat "$CONF/quickshell/wallpaper.conf" 2>/dev/null || true)
+        if [[ "$cur" != "$dir/backgrounds/"* ]]; then
+            local mode
+            mode=$(aequalyn-settings get .wallpaper.mode static 2>/dev/null || echo static)
+            # Picking a theme with backgrounds: its
+            # backgrounds become the rotation, unless a timed mode is running.
+            [[ "$mode" == "static" ]] && aequalyn-settings set-str .wallpaper.mode theme >/dev/null 2>&1 || true
+            aequalyn-wallpaper set "$first"
+        fi
+    fi
+}
+
+cmd_clear() { rm -f "$CURRENT"; }
+
+cmd_backgrounds() {
+    local id=${1:-} dir
+    if [[ -z "$id" ]]; then
+        [[ -e "$CURRENT" ]] || return 0
+        dir=$(readlink -f "$CURRENT")
+    else
+        dir=$(find_theme "$id") || die "no such theme: $id"
+    fi
+    backgrounds_of "$dir"
+}
+
+cmd_install() {
+    local src=${1:-} name dest
+    [[ -n "$src" ]] || die "usage: install <git-url|dir>"
+    mkdir -p "$USER_DIR"
+    if [[ -d "$src" ]]; then
+        name=$(basename "$(cd "$src" && pwd)")
+        name=${name%-theme}
+        dest="$USER_DIR/$name"
+        [[ -e "$dest" ]] && die "already installed: $name"
+        cp -r "$src" "$dest"
+    else
+        name=$(basename "$src" .git)
+        name=${name%-theme}
+        dest="$USER_DIR/$name"
+        [[ -e "$dest" ]] && die "already installed: $name"
+        git clone -q --depth 1 "$src" "$dest" || die "clone failed: $src"
+    fi
+    rm -rf "$dest/.git"
+    [[ -f "$dest/theme.json" || -f "$dest/colors.toml" || -d "$dest/backgrounds" ]] \
+        || { rm -rf "$dest"; die "$src has no theme.json, colors.toml or backgrounds/"; }
+    printf 'installed %s\n' "$name"
+    command -v qs >/dev/null 2>&1 && qs ipc call theme reload >/dev/null 2>&1 || true
+}
+
+cmd_remove() {
+    local id=${1:-}
+    [[ -n "$id" && -d "$USER_DIR/$id" ]] || die "not a user theme: $id"
+    [[ "$(cmd_current)" == "$id" ]] && cmd_clear
+    rm -rf "${USER_DIR:?}/$id"
+    command -v qs >/dev/null 2>&1 && qs ipc call theme reload >/dev/null 2>&1 || true
+}
+
+case "${1:-}" in
+    list)        shift; cmd_list "$@" ;;
+    current)     cmd_current ;;
+    set)         shift; cmd_set "$@" ;;
+    clear)       cmd_clear ;;
+    backgrounds) shift; cmd_backgrounds "$@" ;;
+    install)     shift; cmd_install "$@" ;;
+    remove)      shift; cmd_remove "$@" ;;
+    -h|--help|"") sed -n '2,27p' "$0" ;;
+    *)           die "unknown command: $1" ;;
+esac
