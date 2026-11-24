@@ -203,22 +203,41 @@ def real_image(path, cap):
         raise Fail(f"{path.name} is not a real image")
 
 
+# What qmllint says only because the shell's modules are not there to look in (--bare):
+# not about the plugin, and hundreds of lines of it.
+LINT_NOISE = {"import", "unqualified", "unresolved-type", "missing-property", "missing-type",
+              "uncreatable-type", "unused-imports", "incompatible-type"}
+
+
 def qmllint(files, root):
-    tool = shutil.which("qmllint") or "/usr/lib/qt6/bin/qmllint"
-    if not os.path.exists(tool):
-        say("   (qmllint not found: install qt6-declarative to lint)")
-        return
+    tool = next((t for t in ("/usr/lib/qt6/bin/qmllint", shutil.which("qmllint6"), shutil.which("qmllint"))
+                 if t and os.path.exists(t)), None)
+    if not tool:
+        # nothing that could not be read is ever called checked
+        raise Fail("qmllint is not installed (qt6-declarative): the QML cannot be checked")
     step(f"qmllint over {len(files)} QML files")
-    errors = []
+    errors, hidden = [], 0
     for f in files:
         out = run([tool, "--bare", str(f)])
         for line in (out.stdout + out.stderr).splitlines():
-            if line.startswith("Error") or "error:" in line.lower() and "import" not in line.lower():
-                errors.append(line.replace(str(root) + "/", ""))
-            elif line.startswith("Warning") and "Unknown import syntax" not in line:
-                say("   " + line.replace(str(root) + "/", ""))
+            tag = re.search(r"\[([a-z][a-z.-]*)\]\s*$", line)
+            tag = tag.group(1) if tag else ""
+            text = line.replace(str(root) + "/", "")
+            # a syntax error is printed as a "Warning" too: its tag tells
+            if line.startswith(("Error", "Critical")) or tag.split(".")[0] == "syntax" \
+                    or re.match(r"Warning: .*\b(Duplicated|Found a duplicated|Expected token|Syntax error)\b", line):
+                errors.append(re.sub(r"^Warning", "Error", text))
+            elif line.startswith("Warning"):     # (Info lines only explain these)
+                if tag in LINT_NOISE or "Unknown import syntax" in line:
+                    hidden += 1
+                else:
+                    say("   " + text)
+        if out.returncode < 0:
+            raise Fail(f"qmllint crashed on {f.relative_to(root)}")
     if errors:
         raise Fail("qmllint found errors:\n   " + "\n   ".join(errors))
+    if hidden:
+        say(f"   no errors ({hidden} notes about modules only the shell has are left out)")
 
 
 def scan_code(files, root, ident):
