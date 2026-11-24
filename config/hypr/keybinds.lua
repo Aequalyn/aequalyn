@@ -37,6 +37,10 @@ hl.bind(M .. " + ALT + A", hl.dsp.exec_cmd("qs ipc call defaults toggle")) -- De
 hl.bind(M .. " + ALT + S",       hl.dsp.exec_cmd("qs ipc call store toggle"))   -- Store: plugins, themes, cursors, looks
 hl.bind(M .. " + COMMA",   hl.dsp.exec_cmd("qs ipc call aequalyn settings"))
 hl.bind(M .. " + CTRL + PERIOD",  hl.dsp.exec_cmd("qs ipc call fonts toggle"))        -- Fonts
+hl.bind(M .. " + CTRL + B",       hl.dsp.exec_cmd("qs ipc call quickLooks bar"))      -- Quick looks: bar
+hl.bind(M .. " + CTRL + D",       hl.dsp.exec_cmd("qs ipc call quickLooks dock"))      -- Quick looks: docks
+hl.bind(M .. " + CTRL + K",       hl.dsp.exec_cmd("qs ipc call quickLooks lock"))      -- Quick looks: lock screen
+hl.bind(M .. " + CTRL + G",       hl.dsp.exec_cmd("qs ipc call quickLooks login"))      -- Quick looks: login screen
 -- Window layouts: Super + L steps through them, the control center shows them all
 hl.bind(M .. " + L",         hl.dsp.exec_cmd("aequalyn-layout next"))
 hl.bind(M .. " + SHIFT + L", hl.dsp.exec_cmd("aequalyn-layout prev"))
