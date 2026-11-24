@@ -343,6 +343,9 @@ def check_plugin(root, src, market):
     if re.match(r"\s*ShellRoot\b", body):
         raise Fail("the entry is a ShellRoot: it must be an Item")
     qml = sorted(root.rglob("*.qml"))
+    # what QML starts or imports is the plugin's too: its scripts and helpers
+    helpers = sorted(p for p in root.rglob("*") if p.is_file() and p.suffix not in (".qml", ".md", ".json")
+                     and (p.suffix in (".js", ".mjs", ".sh", ".py") or p.parent.name == "bin" or p.read_bytes()[:2] == b"#!"))
     for f in qml:
         if "pragma Singleton" in f.read_text() and not (f.parent / "qmldir").is_file():
             raise Fail(f"{f.parent.relative_to(root) or '.'} has a singleton but no qmldir")
@@ -351,7 +354,7 @@ def check_plugin(root, src, market):
             if not (root / need).is_file():
                 raise Fail(f"{need} is missing (the Market shows it on your item's page)")
     no_escapes(root)
-    scan_code(qml, root, ident)
+    scan_code(qml + helpers, root, ident)
     qmllint(qml, root)
     # what it wants root for, checked and said out loud BEFORE anything is
     # installed: the actions must be declared here (the command pinned in
@@ -799,7 +802,9 @@ def do_install_market_appimage(it):
 
 
 def do_install_market(ident):
-    it = next((i for i in market_items() if i.get("id") == ident), None)
+    # "theme:lichen", since two kinds may share a name; a bare id still finds the first
+    kind, _, name = ident.rpartition(":")
+    it = next((i for i in market_items() if i.get("id") == name and kind in ("", i.get("kind"))), None)
     if not it:
         raise Fail(f"'{ident}' is not in the catalog")
     if it["kind"] == "appimage":
