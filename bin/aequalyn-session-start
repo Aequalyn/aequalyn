@@ -43,6 +43,11 @@ if command -v systemctl >/dev/null 2>&1; then
     systemctl --user start xdg-desktop-portal-gtk.service     >/dev/null 2>&1 || true
 fi
 
+# 1b. The keyring, on an automatic login: nothing is typed that would unlock it
+if command -v aequalyn-keyring >/dev/null 2>&1; then
+    aequalyn-keyring session >/dev/null 2>&1 || log "aequalyn-keyring failed"
+fi
+
 # A leftover hyprpaper from a previous Hyprland setup would fight awww for the
 # background layer (and keep an old wallpaper on screen). Aequalyn owns wallpapers.
 if pgrep -x hyprpaper >/dev/null 2>&1; then
@@ -148,8 +153,12 @@ if [ -f "$HOME/.local/lib/aequalyn/hyprbars.so" ]; then
         sleep 1
         hyprctl eval "_G.aequalyn_floating.load_decorations()" >/dev/null 2>&1
         sleep 1
-        # not under an approval window someone may be answering (the live ISO's installer):
-        # the restart waits for it, for as long as it can stay open
+        # the plugin has Hyprland number its workspaces anew: the shell reads them again. One
+        # that cannot (an older one) is restarted, though not under an open approval window
+        for _ in {1..20}; do
+            case "$(qs ipc call watchdog resync 2>/dev/null)" in ok) exit 0 ;; esac
+            sleep 1
+        done
         for _ in {1..130}; do
             aequalyn-watchdog status --json 2>/dev/null | jq -e '(.escalations // {}) | length > 0' >/dev/null 2>&1 || break
             sleep 1
