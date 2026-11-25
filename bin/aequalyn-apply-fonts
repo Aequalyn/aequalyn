@@ -8,7 +8,7 @@ SETTINGS="$CONF_DIR/aequalyn/settings.json"
 get() {
   local path="$1" def="$2" v=""
   if [[ -f "$SETTINGS" ]] && command -v jq >/dev/null 2>&1; then
-    v=$(jq -r "$path // empty" "$SETTINGS" 2>/dev/null || true)
+    v=$(jq -r "$path | if . == null then empty else . end" "$SETTINGS" 2>/dev/null || true)
   fi
   printf '%s' "${v:-$def}"
 }

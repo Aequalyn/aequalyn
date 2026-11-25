@@ -17,7 +17,8 @@ DRY=0
 get() { # get <jq-path> <default>
     local v=""
     if [[ -f "$SETTINGS" ]] && command -v jq >/dev/null 2>&1; then
-        v=$(jq -r "$1 // empty" "$SETTINGS" 2>/dev/null || true)
+        # (not `// empty`: that takes false, a setting turned off, for one not set)
+        v=$(jq -r "$1 | if . == null then empty else . end" "$SETTINGS" 2>/dev/null || true)
     fi
     printf '%s' "${v:-$2}"
 }
@@ -36,6 +37,17 @@ natural_scroll=$(get '.hyprland.naturalScroll' true)
 kb_layout=$(get '.hyprland.kbLayout' us)
 follow_mouse=$(get '.hyprland.followMouse' 1)
 sensitivity=$(get '.hyprland.sensitivity' 0)
+
+# A lighter desktop leaves blur and shadows out: chosen, or by itself on a machine with little
+# memory or at most two cores (as the shell has it).
+performance=$(get '.hyprland.performance' auto)
+shadow=true
+if [[ "$performance" == auto ]]; then
+    mem=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+    cores=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo 0)
+    if (( ${mem:-0} > 0 && mem < 4300000 )) || (( ${cores:-0} > 0 && cores <= 2 )); then performance=light; fi
+fi
+if [[ "$performance" == light ]]; then blur_enabled=false; shadow=false; fi
 
 # Cheap sanity checks: never write a broken config.
 [[ "$gaps_in" =~ ^[0-9]+$ ]] || gaps_in=5
@@ -77,7 +89,7 @@ hl.config({
         },
 
         shadow = {
-            enabled = true,
+            enabled = $shadow,
             range = 8,
             render_power = 3,
             color = "rgba(000000aa)",
