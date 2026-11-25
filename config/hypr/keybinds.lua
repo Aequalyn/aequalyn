@@ -78,7 +78,7 @@ hl.bind(M .. " + SHIFT + M", hl.dsp.exec_cmd("qs ipc call power toggle"))
 -- on: control center › Plugins.
 hl.bind(M .. " + SLASH",          hl.dsp.exec_cmd("qs ipc call keyHints toggle"))     -- Key hints
 hl.bind(M .. " + SHIFT + SPACE",  hl.dsp.exec_cmd("qs ipc call palette toggle"))      -- Command palette
-hl.bind(M .. " + EQUAL",          hl.dsp.exec_cmd("qs ipc call calculator toggle"))   -- Calculator
+hl.bind(M .. " + ALT + C",        hl.dsp.exec_cmd("qs ipc call calculator toggle"))   -- Calculator
 hl.bind(M .. " + PERIOD",         hl.dsp.exec_cmd("qs ipc call emoji toggle"))        -- Emoji
 hl.bind(M .. " + SHIFT + P",      hl.dsp.exec_cmd("qs ipc call colorPicker pick"))    -- Pick a colour on the screen
 hl.bind(M .. " + ALT + N",        hl.dsp.exec_cmd("qs ipc call notes toggle"))        -- Quick notes
