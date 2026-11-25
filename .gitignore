@@ -17,3 +17,4 @@ config/hypr/webapps.lua
 config/hypr/lockscreens/.*
 !config/hypr/lockscreens/.*.conf
 
+vendor/hyprbars/built/
