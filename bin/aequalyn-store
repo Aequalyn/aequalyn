@@ -742,10 +742,18 @@ def do_apply_look(ident, piece):
     for p in wanted:
         v = pieces[p]
         step(f"Wearing its {p}")
+        if p in ("bar", "sleep") and qs_ipc("aequalyn", "importLook", p, json.dumps(v)) == "ok":
+            continue
+        # (without the shell running, its settings file is all there is)
         if p == "bar":
             settings_update(lambda d: d.__setitem__("barStyle", dict(d.get("barStyle") or {}, **v, enabled=True)))
         elif p == "dock":
-            if qs_ipc("dock", "importLook", json.dumps(v)) != "ok":
+            said = qs_ipc("dock", "importLook", json.dumps(v))
+            if said == "no docks":
+                say("   there is no dock to wear it")
+            elif said == "does not fit":
+                say("   its ends need more room than a dock has: remove some icons, or make them smaller")
+            elif said != "ok":
                 raise Fail("the docks did not take the look (is the shell running, with docks on?)")
         elif p == "cursor":
             if qs_ipc("plume", "importLook", json.dumps(v)) != "ok":
