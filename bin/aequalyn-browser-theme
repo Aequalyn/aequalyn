@@ -2,9 +2,13 @@
 # aequalyn-browser-theme -- let Chromium-based browsers use the Aequalyn bar colour.
 #
 # Usage:
-#   aequalyn-browser-theme sync [--color '#rrggbb']   publish if the setting is on
-#   aequalyn-browser-theme on [--color '#rrggbb']     publish now
-#   aequalyn-browser-theme off                        remove the policy
+#   aequalyn-browser-theme sync [--color '#rrggbb'] [--palette c,c,...]   if the setting is on
+#   aequalyn-browser-theme on [--color '#rrggbb'] [--palette c,c,...]     now
+#   aequalyn-browser-theme off                        remove it again
+#
+# Chromium, Chrome, Edge, Brave, Vivaldi and their like take it from a policy; Firefox, Zen,
+# LibreWolf, Waterfox and Floorp from a style sheet in each of your profiles (no root needed;
+# they read it as they start).
 #
 # Chromium only reads its frame colour from a system-wide managed policy, so the
 # bar's base colour (bgBase) is published as BrowserThemeColor there. No
@@ -16,8 +20,9 @@
 # naming the command, the password going to sudo on a pipe); the root half is
 # only ever started by the watchdog (gate-publish / gate-clear), re-finds the
 # staged colour through SUDO_USER's home, validates it, and writes the
-# policies itself. No pkexec, no sudo -A, no askpass, no sudoers rules -- and a
-# repeated sync with the same colour still asks for nothing (nothing changes).
+# policies itself. No pkexec, no sudo -A, no askpass. These two halves are among the
+# few commands aequalyn-gate-rules lets run without the password (a hex colour is all
+# they take); without those rules the approval window asks.
 
 set -uo pipefail
 
@@ -83,6 +88,7 @@ gate_root_home() {
 }
 
 if [[ ${1:-} == "gate-publish" || ${1:-} == "gate-clear" ]]; then
+    export PATH=/usr/bin:/usr/local/bin
     [[ ${EUID} -eq 0 ]] || { log "gate halves need root"; exit 1; }
     home=$(gate_root_home)
     stage="$home/.local/state/aequalyn/gate/browser-theme.json"
@@ -124,10 +130,11 @@ fi
 
 # ---- user half --------------------------------------------------------------
 action="${1:-sync}"; shift || true
-color=""
+color=""; colors=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --color) color="${2:-}"; shift 2 ;;
+        --palette) colors="${2:-}"; shift 2 ;;
         --prompt) shift ;;   # kept for compatibility; always interactive now
         *) shift ;;
     esac
@@ -158,6 +165,18 @@ current_color() {
     [[ $c =~ ^#?[0-9a-fA-F]{6}$ ]] || c="#121515"
     [[ $c == \#* ]] || c="#$c"
     printf '%s' "${c,,}"
+}
+
+# the theme's colours for Firefox, when the shell did not say them
+current_palette() {
+    local tc id keys='[.bgBase, .bgSurface, .bgHover, .bgBorder, .textPrimary, .textMuted, .accentPrimary] | map(. // "") | join(",")'
+    tc=$(cat "$HOME/.config/quickshell/theme.conf" 2>/dev/null || true)
+    if [[ $tc == theme:* ]]; then
+        id=${tc#theme:}
+        aequalyn-themes list --json 2>/dev/null | jq -r --arg id "$id" "(.[]? | select(.id == \$id) | .palette // {}) | $keys" 2>/dev/null | head -1 || true
+    else
+        jq -r "$keys" "$HOME/.config/quickshell/theme-switcher/wallpaper-theme.json" 2>/dev/null || true
+    fi
 }
 
 policy_dirs() {
@@ -233,13 +252,86 @@ policy_any() {
     return 1
 }
 
+# ---- Firefox and its like: a style sheet in each profile ---------------------
+# Three things, and nothing of yours: chrome/aequalyn.css (ours whole), one @import line at the
+# top of chrome/userChrome.css, and one pref in user.js that has the browser read it.
+IMPORT='@import "aequalyn.css"; /* Aequalyn */'
+PREF='user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true); // Aequalyn'
+gecko_profiles() {
+    local root
+    for root in "$HOME/.mozilla/firefox" "${XDG_CONFIG_HOME:-$HOME/.config}/mozilla/firefox" "$HOME/.zen" "${XDG_CONFIG_HOME:-$HOME/.config}/zen" \
+                "$HOME/.librewolf" "$HOME/.waterfox" "$HOME/.floorp" "$HOME/.var/app/org.mozilla.firefox/.mozilla/firefox" \
+                "$HOME/.var/app/app.zen_browser.zen/.zen" "$HOME/.var/app/io.gitlab.librewolf-community/.librewolf"; do
+        [[ -f "$root/profiles.ini" ]] || continue
+        sed -n 's/^Path=//p' "$root/profiles.ini" | while IFS= read -r p; do
+            p=${p%$'\r'}
+            [[ "$p" == /* ]] || p="$root/$p"
+            [[ -d "$p" ]] && printf '%s\n' "$p"
+        done
+    done
+}
+gecko_on() {
+    local base surface hover border text muted accent c p css
+    [[ -n "$colors" ]] || colors=$(current_palette)
+    IFS=, read -r base surface hover border text muted accent <<< "$colors"
+    for c in "$base" "$surface" "$hover" "$border" "$text" "$muted" "$accent"; do
+        [[ "$c" =~ ^#[0-9a-fA-F]{6}$ ]] || return 0          # no whole palette: left as it is
+    done
+    [[ -n "$(gecko_profiles | head -1)" ]] || return 0
+    css="/* Written by aequalyn-browser-theme: your desktop's colours. Not for editing: your own go in userChrome.css. */
+:root, :root[lwtheme], :root:not([lwtheme]) {
+  --toolbox-bgcolor: $base !important; --toolbox-bgcolor-inactive: $base !important;
+  --lwt-accent-color: $base !important; --lwt-accent-color-inactive: $base !important; --lwt-text-color: $text !important;
+  --toolbar-bgcolor: $surface !important; --toolbar-color: $text !important; --toolbar-field-background-color: $base !important;
+  --toolbar-field-color: $text !important; --toolbar-field-focus-background-color: $base !important; --toolbar-field-focus-color: $text !important;
+  --toolbar-field-border-color: $border !important; --toolbar-field-focus-border-color: $accent !important;
+  --tab-selected-bgcolor: $surface !important; --tab-selected-textcolor: $text !important; --tab-hover-background-color: $hover !important;
+  --lwt-tab-line-color: $accent !important; --tab-loading-fill: $accent !important;
+  --arrowpanel-background: $surface !important; --arrowpanel-color: $text !important; --arrowpanel-border-color: $border !important;
+  --urlbarView-background: $surface !important; --urlbarView-highlight-background: $hover !important; --urlbarView-highlight-color: $text !important;
+  --sidebar-background-color: $base !important; --sidebar-text-color: $text !important; --chrome-content-separator-color: $border !important;
+  --toolbarbutton-icon-fill: $text !important; --toolbarbutton-hover-background: $hover !important; --toolbarbutton-active-background: $hover !important;
+  --focus-outline-color: $accent !important; --color-accent-primary: $accent !important; --button-primary-bgcolor: $accent !important; --button-primary-color: $base !important;
+  --zen-primary-color: $accent !important; --zen-main-browser-background: $base !important; --zen-colors-primary: $surface !important; --zen-colors-border: $border !important;
+}
+#navigator-toolbox, #TabsToolbar, #titlebar { background-color: $base !important; color: $text !important; }
+#nav-bar, #PersonalToolbar { background-color: $surface !important; color: $text !important; }
+.tab-label { color: $text !important; } .tabbrowser-tab:not([selected]) .tab-label { color: $muted !important; }"
+    while IFS= read -r p; do
+        mkdir -p "$p/chrome" || continue
+        [[ "$(cat "$p/chrome/aequalyn.css" 2>/dev/null)" == "$css" ]] || printf '%s\n' "$css" > "$p/chrome/aequalyn.css"
+        if ! grep -qF "$IMPORT" "$p/chrome/userChrome.css" 2>/dev/null; then
+            # an @import counts only before everything else (a @charset aside)
+            { printf '%s\n' "$IMPORT"; cat "$p/chrome/userChrome.css" 2>/dev/null || true; } > "$p/chrome/userChrome.css.aq" \
+                && mv -f "$p/chrome/userChrome.css.aq" "$p/chrome/userChrome.css"
+        fi
+        grep -qF "$PREF" "$p/user.js" 2>/dev/null || printf '%s\n' "$PREF" >> "$p/user.js"
+    done < <(gecko_profiles | sort -u)
+}
+gecko_off() {
+    local p f
+    while IFS= read -r p; do
+        rm -f "$p/chrome/aequalyn.css"
+        for f in "$p/chrome/userChrome.css" "$p/user.js"; do
+            [[ -f "$f" ]] || continue
+            grep -vF -e "$IMPORT" -e "$PREF" "$f" > "$f.aq" || true
+            if [[ -s "$f.aq" ]]; then mv -f "$f.aq" "$f"; else rm -f "$f.aq" "$f"; fi
+        done
+    done < <(gecko_profiles | sort -u)
+}
+
 refresh_browsers() {
-    local cmd
+    local cmd running name
+    running=$(ps -u "$(id -u)" -o args= 2>/dev/null || true)
     for cmd in google-chrome google-chrome-stable google-chrome-beta \
                chromium chromium-browser microsoft-edge microsoft-edge-stable \
                microsoft-edge-dev brave brave-browser vivaldi vivaldi-stable \
                opera yandex-browser; do
         command -v "$cmd" >/dev/null 2>&1 || continue
+        # one that is not open reads it as it starts: it is not started for that
+        name=${cmd%-stable}; name=${name%-beta}; name=${name%-dev}; name=${name%-browser}
+        case "$name" in google-chrome) name=chrome ;; microsoft-edge) name=msedge ;; esac
+        grep -qE "(^|/)$name(-bin)?([ /]|\$)" <<< "$running" || continue
         "$cmd" --refresh-platform-policy --no-startup-window >/dev/null 2>&1 &
     done
     true
@@ -252,15 +344,18 @@ case "$action" in
         enabled=$(jq -r '.appearance.themeBrowser // false' "$SETTINGS" 2>/dev/null || echo false)
         [[ $enabled == true ]] || exit 0
         [[ -n $color ]] || color=$(current_color)
+        gecko_on
         policy_has "$color" && exit 0
         write_policy || true
         ;;
     on)
         [[ -n $color ]] || color=$(current_color)
+        gecko_on
         policy_has "$color" && exit 0
         write_policy || true
         ;;
     off)
+        gecko_off
         policy_any || exit 0
         remove_policy || true
         ;;
