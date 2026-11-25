@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# aequalyn-keyring -- the keyring where apps keep their passwords, on an automatic login.
+#
+#   aequalyn-keyring session   at login: what can be done without asking (see below)
+#   aequalyn-keyring open      make the existing keyring open by itself: asks its password once
+#
+# The login keyring is unlocked with the password typed at the login screen. Logged in
+# automatically nothing is typed, so the first app that wants it (a browser, mail) asks, at
+# every start. A session that logs in automatically and has no keyring yet gets one without
+# a password; one that has a locked keyring is told once how to change that. A session with
+# a password is left alone.
+set -euo pipefail
+
+DIR="${XDG_DATA_HOME:-$HOME/.local/share}/keyrings"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/aequalyn"
+
+automatic() {
+    local id="${XDG_SESSION_ID:-}" service=""
+    [[ -n "$id" ]] && service=$(loginctl show-session "$id" -p Service --value 2>/dev/null || true)
+    if [[ -z "$service" ]]; then
+        for id in $(loginctl show-user "$(id -u)" -p Sessions --value 2>/dev/null || true); do
+            service=$(loginctl show-session "$id" -p Service --value 2>/dev/null || true)
+            [[ "$service" == sddm* ]] && break
+        done
+    fi
+    [[ "$service" == *autologin* ]]
+}
+
+case "${1:-}" in
+    session)
+        automatic || exit 0
+        if ! compgen -G "$DIR/*.keyring" >/dev/null; then
+            mkdir -p "$DIR"
+            chmod 700 "$DIR"
+            (umask 077
+             printf '[keyring]\ndisplay-name=Default keyring\nctime=%s\nmtime=0\nlock-on-idle=false\nlock-after=false\n' "$(date +%s)" > "$DIR/Default_keyring.keyring"
+             printf 'Default_keyring' > "$DIR/default")
+            # nothing is unlocked yet: the daemon reads it as it starts
+            systemctl --user try-restart gnome-keyring-daemon.service >/dev/null 2>&1 || true
+        elif [[ -f "$DIR/login.keyring" && ! -e "$STATE/keyring-told" ]]; then
+            # (a keyring without a password is a plain file)
+            head -c 9 "$DIR/login.keyring" 2>/dev/null | grep -q '^\[keyring\]' && exit 0
+            [[ -f "$DIR/default" && "$(cat "$DIR/default")" != login ]] && exit 0
+            mkdir -p "$STATE"
+            : > "$STATE/keyring-told"
+            notify-send -a Aequalyn "Your keyring asks for its password" \
+                "You are logged in automatically, so nothing unlocks it. To have it open by itself, run once in a terminal: aequalyn-keyring open" 2>/dev/null || true
+        fi
+        ;;
+    open)
+        [[ -f "$DIR/login.keyring" ]] || { echo "There is no login keyring."; exit 0; }
+        echo "The login keyring will open without a password from now on: its secrets are then"
+        echo "protected by your account and, if you have it, the disk's encryption only."
+        read -rsp "The keyring's password now (normally your login password): " pw; echo
+        PW="$pw" python3 - <<'PY'
+import os, sys
+try:
+    from gi.repository import Gio, GLib
+except ImportError:
+    sys.exit("This needs python-gobject (sudo pacman -S python-gobject).")
+bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+def call(iface, method, args, reply=None):
+    return bus.call_sync("org.freedesktop.secrets", "/org/freedesktop/secrets", iface, method, args,
+                         GLib.VariantType(reply) if reply else None, Gio.DBusCallFlags.NONE, 30000, None)
+S = "org.freedesktop.Secret.Service"
+session = call(S, "OpenSession", GLib.Variant("(sv)", ("plain", GLib.Variant("s", "")))).unpack()[1]
+secret = lambda text: (session, b"", text.encode(), "text/plain")
+try:
+    call("org.gnome.keyring.InternalUnsupportedGuiltRiddenInterface", "ChangeWithMasterPassword",
+         GLib.Variant("(o(oayays)(oayays))", ("/org/freedesktop/secrets/collection/login", secret(os.environ["PW"]), secret(""))))
+except GLib.Error as e:
+    sys.exit("It was not changed: " + ("the password is wrong." if "nvalid" in e.message or "enied" in e.message else e.message))
+print("Done: it opens by itself from the next login on.")
+PY
+        ;;
+    *) sed -n '2,13p' "$0"; exit 2 ;;
+esac
