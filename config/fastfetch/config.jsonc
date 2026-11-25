@@ -3,38 +3,146 @@
   "logo": {
     "type": "file",
     "source": "~/.config/fastfetch/aequalyn.txt",
-    "width": 46,
-    "padding": { "right": 2 }
-  },
-  "display": {
-    "separator": "  ",
-    "color": { "keys": "cyan", "title": "magenta" },
-    "key": { "width": 12, "type": "string" },
-    "percent": { "type": 3 }
+    "color": {
+      "1": "blue"
+    },
+    "padding": {
+      "top": 7,
+      "left": 1,
+      "right": 3
+    }
   },
   "modules": [
-    "title",
-    "separator",
-    { "type": "os", "key": "Aequalyn", "format": "{name} {version}" },
-    "host",
-    "kernel",
-    "uptime",
-    "packages",
-    "shell",
-    "display",
-    "de",
-    "wm",
-    "theme",
-    "icons",
-    "terminal",
-    "cpu",
-    "gpu",
-    "memory",
-    "disk",
-    "localip",
-    "battery",
-    "locale",
     "break",
-    "colors"
+    {
+      "type": "custom",
+      "format": "\u001b[90m┌──────────────────────Hardware──────────────────────┐"
+    },
+    {
+      "type": "host",
+      "key": " 󰌢 PC",
+      "keyColor": "green"
+    },
+    {
+      "type": "cpu",
+      "key": "│ ├",
+      "keyColor": "green",
+      "showPeCoreCount": true
+    },
+    {
+      "type": "gpu",
+      "key": "│ ├󰢮",
+      "keyColor": "green",
+      "detectionMethod": "pci"
+    },
+    {
+      "type": "display",
+      "key": "│ ├󰍹",
+      "keyColor": "green"
+    },
+    {
+      "type": "disk",
+      "key": "│ ├󰋊",
+      "keyColor": "green",
+      "folders": "/"
+    },
+    {
+      "type": "memory",
+      "key": "│ ├󰍛",
+      "keyColor": "green"
+    },
+    {
+      "type": "swap",
+      "key": "└ └󰓡",
+      "keyColor": "green"
+    },
+    {
+      "type": "custom",
+      "format": "\u001b[90m└────────────────────────────────────────────────────┘"
+    },
+    "break",
+    {
+      "type": "custom",
+      "format": "\u001b[90m┌──────────────────────Software──────────────────────┐"
+    },
+    {
+      "type": "command",
+      "key": " æ OS",
+      "keyColor": "blue",
+      "text": "echo \"Aequalyn $(cat /usr/share/aequalyn/VERSION /opt/aequalyn/VERSION 2>/dev/null | head -n 1)\""
+    },
+    {
+      "type": "command",
+      "key": "│ ├󰘬",
+      "keyColor": "blue",
+      "text": "c=$(git -c safe.directory=/usr/share/aequalyn -C /usr/share/aequalyn rev-parse --short HEAD 2>/dev/null) && echo \"$(git -c safe.directory=/usr/share/aequalyn -C /usr/share/aequalyn rev-parse --abbrev-ref HEAD) ($c)\""
+    },
+    {
+      "type": "kernel",
+      "key": "│ ├󰌽",
+      "keyColor": "blue"
+    },
+    {
+      "type": "wm",
+      "key": "│ ├󰖲",
+      "keyColor": "blue"
+    },
+    {
+      "type": "terminal",
+      "key": "│ ├󰆍",
+      "keyColor": "blue"
+    },
+    {
+      "type": "terminalfont",
+      "key": "│ ├",
+      "keyColor": "blue"
+    },
+    {
+      "type": "shell",
+      "key": "│ ├󱆃",
+      "keyColor": "blue"
+    },
+    {
+      "type": "packages",
+      "key": "│ ├󰏖",
+      "keyColor": "blue"
+    },
+    {
+      "type": "command",
+      "key": "└ └󰏘",
+      "keyColor": "blue",
+      "text": "d=~/.config/aequalyn/current/theme; if [ \"$(cat ~/.config/quickshell/theme.conf 2>/dev/null)\" = wallpaper ]; then n='From the wallpaper'; else n=$(jq -r '.name // empty' $d/theme.json 2>/dev/null); fi; [ -n \"$n\" ] || n=$(basename \"$(readlink $d)\"); printf '%s \\033[31m●\\033[32m●\\033[33m●\\033[34m●\\033[35m●\\033[36m●\\033[37m●\\033[90m●\\033[0m\\n' \"$n\""
+    },
+    {
+      "type": "custom",
+      "format": "\u001b[90m└────────────────────────────────────────────────────┘"
+    },
+    "break",
+    {
+      "type": "custom",
+      "format": "\u001b[90m┌───────────────Age / Uptime / Update────────────────┐"
+    },
+    {
+      "type": "command",
+      "key": " 󰃭 OS Age",
+      "keyColor": "cyan",
+      "text": "b=$(stat -c %W / 2>/dev/null); [ \"${b:-0}\" -gt 0 ] && echo \"$(( ($(date +%s) - b) / 86400 )) days\""
+    },
+    {
+      "type": "uptime",
+      "key": " 󰔛 Uptime",
+      "keyColor": "cyan"
+    },
+    {
+      "type": "command",
+      "key": " 󰚰 Update",
+      "keyColor": "cyan",
+      "text": "t=$(grep -a 'starting full system upgrade' /var/log/pacman.log 2>/dev/null | tail -n 1 | cut -d']' -f1 | tr -d '['); [ -n \"$t\" ] && LC_TIME=C date -d \"$t\" '+%A, %B %d at %H:%M'"
+    },
+    {
+      "type": "custom",
+      "format": "\u001b[90m└────────────────────────────────────────────────────┘"
+    },
+    "break"
   ]
 }
