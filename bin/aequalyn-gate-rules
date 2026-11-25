@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# aequalyn-gate-rules -- what a theme change needs root for, without the password.
+#
+#   aequalyn-gate-rules            write the rules for the administrators (group wheel)
+#   aequalyn-gate-rules --remove   take them away: the approval window asks again
+#
+# Exactly three commands, each a root-owned script with a fixed argument that trusts nothing
+# but a checked value: the browsers' colour (a hex colour), its removal, and the login
+# screen's theme (the name of an installed one). Everything else that needs root -- packages,
+# autologin, the installer -- keeps asking.
+set -euo pipefail
+
+FILE=${AEQUALYN_GATE_RULES:-/etc/sudoers.d/aequalyn-gate}
+[[ $EUID -eq 0 ]] || { echo "aequalyn-gate-rules: needs root" >&2; exit 1; }
+case "${1:-}" in
+    --remove) rm -f "$FILE"; exit 0 ;;
+    "") ;;
+    *) sed -n '2,11p' "$0"; exit 2 ;;
+esac
+
+new=$(mktemp "$(dirname "$FILE")/.aequalyn-gate.XXXXXX")
+trap 'rm -f "$new"' EXIT
+cat > "$new" <<'EOF'
+# Written by aequalyn-gate-rules: what a theme change does as root, without the password.
+%wheel ALL=(root) NOPASSWD: /usr/local/bin/aequalyn-browser-theme gate-publish, /usr/local/bin/aequalyn-browser-theme gate-clear, /usr/local/bin/aequalyn-sddm gate-apply
+EOF
+chmod 440 "$new"
+# a broken file here would take sudo away altogether
+visudo -cqf "$new" || { echo "aequalyn-gate-rules: the rules did not pass visudo, nothing was changed" >&2; exit 1; }
+mv -f "$new" "$FILE"

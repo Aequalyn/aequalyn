@@ -112,10 +112,11 @@ case "${1:-}" in
         exit 0
         ;;
     gate-apply)
+        export PATH=/usr/bin:/usr/local/bin
         [[ ${EUID} -eq 0 ]] || { echo "needs root" >&2; exit 1; }
         stage="$(gate_root_home)/.local/state/aequalyn/gate/sddm.json"
         name=$(jq -r '.theme // empty' "$stage" 2>/dev/null || true)
-        [[ $name =~ ^[A-Za-z0-9._-]+$ ]] || { echo "staged theme is missing or invalid" >&2; exit 1; }
+        [[ $name =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "staged theme is missing or invalid" >&2; exit 1; }
         do_apply "$name"
         exit 0
         ;;
