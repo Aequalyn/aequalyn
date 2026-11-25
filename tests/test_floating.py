@@ -414,7 +414,8 @@ check('function presetIndexOf(p)' in snap_qml and
       'root.presets[i].name === name' in snap_qml,
       "layout buttons resolve their preset by name, not by a copied object's identity")
 check('function reflowFloating(previous, changed)' in snap_qml and
-      'root.reflowFloating(previous, changed)' in snap_qml and
+      'root.reflow = root.reflow ?' in snap_qml and
+      snap_qml.index('root.reflowFloating(m.previous, m.changed)') < snap_qml.index('root.reapplySnap()', snap_qml.index('root.reflowFloating(m.previous, m.changed)')) and
       'snapped.indexOf(addr) >= 0' in snap_qml,
       "free floaters are moved out from under a relocated bar without disturbing snapped ones")
 check('g.y - root.titleHeight' in snap_qml and 'g.h + root.titleHeight' in snap_qml and
@@ -427,13 +428,17 @@ check('hl.dsp.window.resize' in snap_qml and
       "windows are resized before being moved into the zone")
 check('hyprctl -j cursorpos' in snap_qml and
       'cursorProc.exec(cursorProc.command)' in snap_qml,
-      "cursor position is polled with a process that actually restarts each tick")
+      "cursor position is asked for with a process that actually restarts each tick")
 check('hyprctl activewindow -j' in snap_qml and
       'property string focusedAddress' in snap_qml and
       'let addr = norm(root.focusedAddress)' in snap_qml,
-      "focused window is polled directly because newer clients omit a focused flag")
-check('triggeredOnStart: true' in snap_qml,
-      "poll timer starts immediately")
+      "focused window is asked for directly because newer clients omit a focused flag")
+check('running: root.open' in snap_qml and snap_qml.count('running: true') <= 8 and
+      not re.search(r'interval: (\d{1,3})\n\s+repeat: true\n\s+running: true', snap_qml),
+      "nothing is polled while the picker is closed")
+check('function showNow()' in snap_qml and 'activeProc.exec(activeProc.command)' in snap_qml and
+      'onExited: answerSoon.restart()' in snap_qml,
+      "opening the picker asks for the windows, monitors, pointer and focus first")
 check('on_double_click = "hyprctl eval' in float_lua,
       "titlebar double-click uses the working Lua dispatcher path")
 check('function inTopStrip(mon)' not in snap_qml and
@@ -452,7 +457,7 @@ check('bottom_gap' not in snap_qml and 'pointerBottom' not in snap_qml and
 check('snap_top_line' not in float_lua and 'snap_top_strip' not in float_lua and
       'dbg_edge' not in float_lua,
       "compositor has no snap-edge tracking left")
-check('lastLayoutPoll' in snap_qml and 'root.refreshLayout()' in snap_qml,
+check(re.search(r'function show\(\) \{\s+refreshLayout\(\)', snap_qml),
       "layout changes made outside the shell reach the picker")
 check('function geom(c)' in snap_qml and 'c.at' in snap_qml and 'c.size' in snap_qml,
       "window geometry is read from hyprctl's at/size fields")
