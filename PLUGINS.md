@@ -14,12 +14,13 @@ metadata `PluginInfo.js`, manager `PluginManager.qml`, sandbox via
 ## Install / uninstall (core helpers)
 
 - `bin/aequalyn-store` (and the Store plugin) drives install/update/remove.
-- Pipeline: clone → check files → `qmllint` → install → `qs ipc call plugins rescan`.
+- Pipeline: clone at the reviewed commit → check files → `qmllint` → install → `qs ipc call plugins rescan`.
+- A Market item is updated only to the commit its catalog carries, never to the repo's head.
 - `aequalyn-settings` persists `enabledPlugins` in `~/.config/aequalyn/settings.json`.
 
 ## Root gate (core side)
 
-- `bin/aequalyn-watchdog` / `aequalyn-askpass` integrate with the shell's gate.
+- `aequalyn-watchdog` (aequalyn-shell's `tools/watchdog/`) / `aequalyn-askpass` integrate with the shell's gate.
 - Plugins declare `needsRoot` actions; the gate pins the caller via `SO_PEERCRED`.
 
 ## Plugin lifecycle notes for core maintainers
@@ -27,8 +28,8 @@ metadata `PluginInfo.js`, manager `PluginManager.qml`, sandbox via
 - Turning a plugin off runs `Component.onDestruction`: stop processes, give back what
   it changed, clear its host.
 - Bar widgets owned by a plugin are not loaded while that plugin is off.
-- See `aequalyn-shell/PLUGINS.md` for the authoring standard and `aequalyn-store`
-  guidelines (`guidelines/plugin.md`) for submission rules.
+- See `aequalyn-shell/PLUGINS.md` for the authoring standard and `aequalyn-market`'s
+  `docs/guidelines/plugin.md` for submission rules.
 
 ## Security
 

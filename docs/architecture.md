@@ -66,10 +66,10 @@ rogue attempt so the tripwire can be watched. The full contract, with its
 honest limits (sampling, consent-and-audit rather than a hard sandbox), is in
 aequalyn-shell's `tools/watchdog/README.md`; `PLUGINS.md` is the author's side.
 
-## Atelier: themes, wallpapers, rotation, palette
+## Themes, wallpapers, rotation, palette
 
 ```
-Atelier (shell/atelier)                 aequalyn-wallpaper (bin)
+Picker and control center                aequalyn-wallpaper (bin)
   Themes ──> Theme.qml ──────────────┐    set / next / prev / random / tick
   Wallpapers ─┐                      │    modes: static theme slideshow
   Rotation ───┼─> AtelierService ────┼──>        daytime workspace live
@@ -100,7 +100,7 @@ Hyprland calls, so the same file is used three ways:
 geometry.lua ──> layouts.lua (Hyprland)   hl.layout.register("aq-<id>"), window
              │                            order per workspace, promote / swap / grow
              ├─> scripts/layouts-json.py  config/aequalyn/layouts.json: names,
-             │                            groups, a picture of each (Atelier, CLI)
+             │                            groups, a picture of each (control center, CLI)
              └─> tests/test_layouts.py    1..12 windows: count, bounds, overlap
 ```
 
@@ -115,7 +115,7 @@ Hyprland so the rule takes effect.
 
 | Consumer | Reads | Writes |
 | --- | --- | --- |
-| `Settings.qml` | all keys | via `AequalynSettings.save()` |
+| Control center | all keys | via `AequalynSettings.save()` |
 | `aequalyn-hypr-apply` | `hyprland.*` | `hypr/aequalyn/look.lua` |
 | `aequalyn-theme` | `appearance.themeMode`, `themeApps` | matugen outputs |
 | `aequalyn-idle` | `power.*` | `~/.config/aequalyn/hypridle.conf` |
@@ -144,9 +144,9 @@ hyprland.lua
 ## Install flow
 
 ```
-aequalyn-install (gum/dialog/plain TUI)
+aequalyn-install (QML wizard)
   ├─ aequalyn-detect (L1) -> hardware + proposed profiles
-  ├─ six-step wizard -> install.toml
+  ├─ Welcome, Identity, Disk, Packages, Aequalyn, Review -> install.toml
   ├─ show diff, optionally edit, approve
   └─ apply.sh
        ├─ validate UEFI + disk, resolve offline/online repo
@@ -176,11 +176,11 @@ works with no network.
 
 ## Bluetooth
 
-`shell/bluetooth/BluetoothService.qml` wraps Quickshell's native
+`plugins/bluetooth/BluetoothService.qml` (aequalyn-shell) wraps Quickshell's native
 `Quickshell.Bluetooth` singleton (`defaultAdapter`, `devices`, adapter
 `enabled`/`discovering`, device `connected`, `pair()`, `forget()`). The bar has a
-compact icon-only pill (hover tooltip / right-click → Settings), and Settings →
-Bluetooth shows the adapter toggle, scan, device list, and an **Audio profile**
+compact icon-only pill with a quick panel, and the control center's Bluetooth page
+shows the adapter toggle, scan, device list, and an **Audio profile**
 row per headset. Profiles come from `bin/aequalyn-bluetooth-audio`, which parses
 `pactl list cards` for `bluez_card.*` entries and switches with
 `pactl set-card-profile <card> <profile>`.

@@ -2,7 +2,7 @@
 
 Aequalyn no longer uses hyprlock for the running session. The lock is a first-party Quickshell plugin that owns the Wayland `ext-session-lock` client and authenticates through PAM directly. Hyprland grants the protocol and dispatches keys; sudo is not involved in locking or unlocking.
 
-For the user-facing side, see Settings → Sleep and the lock hotkey `Super + Ctrl + Shift + L`.
+For the user-facing side, see Control center → Lock and sleep and the lock hotkey `Super + Ctrl + Shift + L`.
 
 ## Layout
 

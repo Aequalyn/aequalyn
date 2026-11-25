@@ -4,81 +4,70 @@ Aequalyn is an Arch Linux ISO and desktop built around a [QuickShell](https://qu
 shell for [Hyprland](https://hyprland.org/), with wallpaper-driven
 [matugen](https://github.com/InioX/matugen) colours applied systemwide.
 
-- **Top bar** — three configurable regions (**left / center / right**). Plugins
-  include time, workspaces, media, window title, volume, brightness, CPU,
-  network, **Bluetooth**, battery, temperature, system tray, **screen recorder**,
-  **caffeine**, and **power menu**. Plugins are toggleable and can be reordered
-  or moved between regions from **Settings → Top bar** (drag-and-drop or precise
-  move controls). The Arch apps-menu and settings gear are bar items that can
-  be placed in any region or hidden.
-- **Bar and docks** — the bar is painted behind its widgets as a band, a pill,
-  isles or a pebble per widget, in 26 Aequalyn looks; up to 16 docks (4 per
-  edge of each screen) wear the bar's look or one of their own, and 8
-  ensembles dress both at once. Set in the **Themes and wallpapers** picker → Bar / Docks
-  (`settings.json` → `barStyle`, `~/.config/aequalyn/docks.json`); IPC
-  `qs ipc call dock toggle|show|hide|add|settings <n>`.
-- **Bluetooth** — bar indicator (power toggle on click, Settings on right-click)
-  and **Settings → Bluetooth** for adapter power, scanning, device
-  connect/disconnect/forget, and **audio profile** selection (A2DP vs HSP/HFP)
-  for connected headsets. Backed by Quickshell's native `Quickshell.Bluetooth`
-  (BlueZ over D-Bus) plus `pactl` card profiles.
-- **Universal clipboard** — `Super + C / V / X / A` copy, paste, cut and
-  select-all in every app (terminals get `Ctrl+Shift+C/V` automatically).
-  `Super + Ctrl + V` opens the searchable history overlay (text **and**
-  images). Backed by `wl-paste --watch`.
-- **Power menu** — QuickShell power menu with Lock, Log out, Reboot, and
-  Shutdown (`qs ipc call power toggle`; bar plugin; keybind depends on host
-  config, e.g. `Super+Shift+M` or `Super+M`).
-- **Screen recorder** — bar plugin and `Super + Shift + R` toggle via
-  `bin/aequalyn-record` (`gpu-screen-recorder`), saving to `~/Videos/Aequalyn-*.mp4`.
-- **Screenshots** — bar plugin and keybinds via `bin/aequalyn-screenshot`
-  (`grim`/`slurp`/`wl-copy`); every shot is saved to
-  `~/Pictures/Screenshots/Aequalyn-*.png`, and the default shortcuts copy it to
-  the clipboard too.
-- **Snapshots** — `snapper` on Btrfs plus
-  [`limine-mkinitcpio-hook`](https://aur.archlinux.org/packages/limine-mkinitcpio-hook)
-  and
-  [`limine-snapper-sync`](https://aur.archlinux.org/packages/limine-snapper-sync)
-  from the AUR, so snapshots appear as a **Snapshots** submenu in the Limine
-  boot menu. Both packages are pre-built into the ISO's offline repo.
-- **Themes and wallpapers picker** — the theme/wallpaper picker (Super + T / Super + W);
-  its former tabs are now control-center pages. Six layouts per collection (grid,
-  carousel, filmstrip, radial, list, spotlight) with live preview of themes on
-  the whole shell. Wallpapers can be static, cycle through the active theme's
-  backgrounds, run as a slideshow, follow the time of day, differ per workspace
-  or play as video (`mpvpaper`), with awww transitions on every monitor.
-  Colours follow the wallpaper or stay pinned to a theme, with a choice of
-  matugen scheme, contrast and dark / light / auto.
+![The desktop](https://raw.githubusercontent.com/Aequalyn/aequalyn-shell/main/docs/screenshots/desktop.jpg)
+
+- **Bar and docks** — a bar on any edge, its widgets in three regions (**left / center /
+  right**) you reorder by dragging, with a quick panel under most of them. It is painted as
+  a band, a pill, isles or a pebble per widget in 58 looks; up to 16 docks (4 per edge of
+  each screen) wear the bar's look or one of 32 of their own, and 8 ensembles dress both at
+  once. `settings.json` → `barStyle`, `~/.config/aequalyn/docks.json`.
+- **Control center** (`Super + ,`) — every setting with a search over all of them, in five
+  groups: **Look** (wallpaper, theme, theme picker, text, cursor, login screen), **Desktop**
+  (bar, dock, media, clipboard, showcase), **Windows** (arranging, look, switcher),
+  **Devices** (screens, sound, keyboard and mouse, shortcuts, Bluetooth, Wi-Fi) and
+  **System** (lock and sleep, clock, plugins, updates, backup, about). Backed by
+  `~/.config/aequalyn/settings.json`.
+- **Store** (`Super + Alt + S`) — plugins, themes, cursors, wallpapers and looks, apps from
+  Arch, the AUR, Flathub and Snap, web apps, AI tools and AppImages. What others made comes
+  from the [Market](https://github.com/Aequalyn/aequalyn-market): reviewed, and installed and
+  updated only to the exact commit that was. `Super + I` and `Super + R` are quick choosers to
+  install and remove.
+- **Plugins** — more than forty, each on or off at once: launchers, notifications, Aequalyn
+  FM (the file manager and every app's open and save dialogs), Clipscape clipboard, Showcase
+  desktop widgets, media, window switcher, cursor effects, calculator, emoji, notes, timer,
+  weather, system monitor and more. Others' plugins may bring a bar widget of their own. A
+  watchdog restarts what crashes or hangs and turns off what keeps failing.
+- **Lock screen and login screen** — thirty lock screen designs, and SDDM
+  [login themes](https://github.com/Aequalyn/aequalyn-lockscreens). Lock, display-off and suspend each have their own timeout (Lock and sleep);
+  `Super + Shift + C` toggles Caffeine.
+- **Themes and wallpapers** (`Super + T`, `Super + W`) — eight layouts per collection (slices,
+  showcase, carousel, grid, filmstrip, radial, list, spotlight) with the whole shell previewing the theme
+  under the cursor. Wallpapers can be static, cycle through the theme's backgrounds, run as a
+  slideshow, follow the time of day, differ per workspace or play as video (`mpvpaper`), with
+  awww transitions on every monitor. Colours follow the wallpaper or stay pinned to a theme,
+  with a choice of matugen scheme, contrast and dark / light / auto.
+- **Fonts** (`Super + Ctrl + .`) — one for the interface, one for code, or one for both,
+  applied at once to the shell, GTK, Qt, kitty, fuzzel and every open foot window.
+- **Quick looks** — the bar, the docks, the lock screen and the login screen change from a
+  list: `Super + Ctrl + B / D / K / G`.
 - **38 window layouts** — 33 of Aequalyn's own (Portrait, Landscape,
   Centerpiece, Stage, Theatre, four Galleries, four Diptychs, Triptych, Bento,
   Hero, Corner, Panels, Ultrawide, Mosaic, Spread, Ledger, Shelves, Masonry,
   Quadrant, Twin Columns, Strip, Column, Spiral, Fibonacci, Golden, Pinwheel,
-  Cascade) plus Hyprland's Dwindle, Master, Scrolling and Monocle. One per
-  workspace, kept across reboots; `Super + L` steps through the ones you
-  keep in the cycle, `Super + Alt + L` shows them all in the picker.
-- **Folder themes** — a palette plus backgrounds (`colors.toml` +
-  `backgrounds/`) install as they are:
-  `aequalyn-themes install <git-url>`.
-- **Default wallpaper** — `assets/beach.jpg`. Changing it recolours the whole
-  system (shell, Hyprland, GTK, Qt, terminals, btop, hyprlock) via matugen, on
-  every monitor.
-- **Settings page** — Appearance / Top bar / Hyprland / Bluetooth / Displays /
-  Power / About, backed by `~/.config/aequalyn/settings.json` (`Super + ,`).
-- **Power & idle** — screen lock, display-off and suspend each have their own
-  timeout and on/off switch (`Settings -> Power`), generated into hypridle's
-  config. `Super + Shift + C` toggles Caffeine (idle inhibit), and its state
-  survives shell restarts.
-- **Colours** — one wallpaper change repaints the shell, Hyprland borders,
-  kitty, foot, fuzzel, GTK 3/4, qt6ct, btop and hyprlock.
-- **Defaults** — Hyprland, kitty, fuzzel, chromium, nautilus, grim/slurp/swappy,
-  hyprlock/hypridle (lock 5 min, display off 6 min, suspend 15 min — all
-  configurable), awww wallpapers, zram, snapper snapshots.
-- **Installer** — hybrid offline/online, dual-boot, LUKS2, Btrfs subvolumes,
-  Limine, package profiles, config-first `install.toml`, L1 hardware proposal.
+  Cascade) plus Hyprland's Dwindle, Master, Scrolling and Monocle, and Floating. One per
+  workspace, kept across reboots; `Super + L` steps through the ones you keep in the cycle,
+  `Super + Alt + L` shows them all, `Super + G` snaps floating windows.
+- **Universal clipboard** — `Super + C / V / X / A` copy, paste, cut and select all in every
+  app (terminals get `Ctrl+Shift+C/V` automatically). `Super + Ctrl + V` opens the searchable
+  history (text **and** images).
+- **Screen capture** — screenshots (`Print`, `Super + Ctrl + S`) are saved to
+  `~/Pictures/Screenshots` and copied; recording (`Super + Ctrl + R`) saves to
+  `~/Videos`; `Super + Alt + X` copies text off the screen.
+- **Bluetooth** — adapter power, scanning, connect / disconnect / forget, and the **audio
+  profile** (A2DP or HSP/HFP) of a connected headset.
+- **Snapshots** — `snapper` on Btrfs plus
+  [`limine-mkinitcpio-hook`](https://aur.archlinux.org/packages/limine-mkinitcpio-hook) and
+  [`limine-snapper-sync`](https://aur.archlinux.org/packages/limine-snapper-sync), so
+  snapshots appear in the Limine boot menu. Both are pre-built into the ISO's offline
+  repository.
+- **Colours** — one wallpaper change repaints the shell, Hyprland borders, kitty, foot,
+  fuzzel, GTK 3/4, qt6ct, btop and the lock screen.
+- **Installer** — offline or online, dual boot, LUKS2, Btrfs subvolumes, Limine, eight
+  package profiles, config-first `install.toml`, a hardware proposal.
 
 The full change log is the git history of this and the sibling repos
 (`aequalyn-shell`, `aequalyn-installer`, `aequalyn-iso`, `aequalyn-pkgs`,
-`aequalyn-themes`, `aequalyn-store`).
+`aequalyn-themes`, `aequalyn-lockscreens`, `aequalyn-market`).
 
 ## Repositories
 
@@ -87,9 +76,11 @@ Aequalyn is split across the [Aequalyn](https://github.com/Aequalyn) organisatio
 | Repository | What it holds | Installed to |
 | --- | --- | --- |
 | [aequalyn](https://github.com/Aequalyn/aequalyn) | `aequalyn-*` commands, default config, `install.sh` | `~/.local/bin`, `~/.config` |
-| [aequalyn-shell](https://github.com/Aequalyn/aequalyn-shell) | Quickshell desktop: shaped bar, up to 16 docks, launcher, themes and wallpapers picker, settings | `~/.config/quickshell` |
+| [aequalyn-shell](https://github.com/Aequalyn/aequalyn-shell) | Quickshell desktop: bar, up to 16 docks, control center, Store, lock screen, plugins | `~/.config/quickshell` |
 | [aequalyn-themes](https://github.com/Aequalyn/aequalyn-themes) | Folder themes (palette + backgrounds) | `~/.local/share/aequalyn/themes` |
-| [aequalyn-installer](https://github.com/Aequalyn/aequalyn-installer) | `aequalyn-install` TUI, `aequalyn-detect`, `install.toml` | live ISO `/opt/aequalyn/installer` |
+| [aequalyn-lockscreens](https://github.com/Aequalyn/aequalyn-lockscreens) | Login screens for SDDM | `/usr/share/sddm/themes` |
+| [aequalyn-market](https://github.com/Aequalyn/aequalyn-market) | The Store's catalog of what others made | read by `aequalyn-store` |
+| [aequalyn-installer](https://github.com/Aequalyn/aequalyn-installer) | `aequalyn-install` wizard, `aequalyn-detect`, `install.toml` | live ISO `/opt/aequalyn/installer` |
 | [aequalyn-iso](https://github.com/Aequalyn/aequalyn-iso) | archiso profile, `aequalyn-iso-make`, `aequalyn-iso-test` | — |
 | [aequalyn-pkgs](https://github.com/Aequalyn/aequalyn-pkgs) | Package lists, install profiles, PKGBUILDs, cached AUR builds | — |
 
@@ -101,6 +92,10 @@ aequalyn/
 ├── config/           -> ~/.config              (hypr, matugen, kitty, ...)
 ├── assets/           default wallpaper
 ├── docs/             architecture notes
+├── migrations/       changes an update makes to an existing system
+├── scripts/          generators (layout pictures, ...)
+├── systemd/ plymouth/  units and the boot splash
+├── tests/            python3 tests/test_<name>.py
 ├── install.sh        install Aequalyn into a home directory / /etc/skel
 └── VERSION
 ```
@@ -173,15 +168,13 @@ Everything works without AI.
 
 ## AI and development tools
 
-**Settings → AI tools** can install, update and remove Claude Code, Codex CLI,
-GitHub Copilot CLI, Gemini CLI, OpenCode, Qwen Code, Kilo Code CLI, Cline CLI,
-Crush and Amp CLI for the current user. They are installed from their
-publishers' npm packages under `~/.local/share/aequalyn/ai-tools`; their
-commands are linked into `~/.local/bin`. Node.js and npm are required. Agent
-sign-in and configuration stay with each provider. **Settings → Apps** lets you
-choose defaults for the browser, terminal, file manager, text and video apps, and
-the installed AI coding tool. Press **Super + Alt + A** to open the default apps
-launcher. **Super + Space** opens the programs menu.
+The Store's **AI tools** page can install, update and remove Claude Code, Codex CLI,
+GitHub Copilot CLI, Antigravity CLI, OpenCode, Qwen Code, Kilo Code CLI, Cline CLI, Crush
+and Amp CLI for the current user. They come from their publishers (npm, or the vendor's own
+installer) and live under `~/.local/share/aequalyn/ai-tools`; their commands are linked into
+`~/.local/bin`. The npm ones need Node.js and npm. Sign-in and configuration stay with each
+provider. **Super + Alt + A** chooses the default browser, terminal, file manager, text and
+video apps, and the AI coding tool.
 
 The same manager is available in a terminal as `aequalyn-ai-tool list`,
 `aequalyn-ai-tool install codex`, `aequalyn-ai-tool update codex`,
@@ -197,14 +190,24 @@ languages, mise, npm and uv; the Store can add packages to an existing system.
 | `Super + Return` | Terminal |
 | `Super + D` | App launcher |
 | `Super + Space` | Programs menu: browse applications and CLI tools by category |
-| `Super + ,` / gear in bar | Aequalyn settings |
+| `Super + ,` / gear in bar | Control center |
+| `Super + Alt + S` | Store |
+| `Super + I` / `Super + R` | Install / remove chooser (the installer on the live ISO) |
+| `Super + E` / `Super + Alt + F` | File manager / Aequalyn FM |
+| `Super + B` | Browser |
+| `Super + Ctrl + B` / `D` / `K` / `G` | Quick looks: bar / docks / lock screen / login screen |
+| `Super + Ctrl + .` | Fonts |
+| `Super + /` | Key hints |
+| `Super + Shift + Space` | Command palette |
+| `Super + G` | Snap layouts |
+| `Super + Ctrl + Shift + L` | Lock |
 | `apps-menu` Arch logo in bar | App launcher |
 | `Super + T` / `Super + Ctrl + Shift + Space` | Themes and wallpapers: themes |
 | `Super + W` | Themes and wallpapers: wallpapers |
-| `Super + Shift + W` | Themes and wallpapers: rotation |
+| `Super + Shift + W` | Wallpaper: change it over time |
 | `Super + Ctrl + Space` | Next wallpaper |
 | `Super + L` / `Super + Shift + L` | Next / previous window layout |
-| `Super + Alt + L` | Themes and wallpapers: layouts |
+| `Super + Alt + L` | Arranging windows: every layout |
 | `Super + Ctrl + L`, then `1`–`9` | Dwindle, Scrolling, Master, Portrait, Landscape, Centerpiece, Diptych Left, Diptych Right, Mosaic |
 | `Super + Ctrl + L`, `0`, then `1`–`0`, `-`, `=` | Strip, Column, Spiral, Gallery Right, Gallery Bottom, Gallery Left, Gallery Top, Spread, Diptych Top, Diptych Bottom, Triptych, Bento |
 | `Super + Z` | Make the focused window the main one |
@@ -218,12 +221,18 @@ languages, mise, npm and uv; the Store can add packages to an existing system.
 | `Super + Ctrl + V` | Clipscape clipboard history (search, pins, previews) |
 | `Super + Shift + C` | Caffeine (idle inhibit) |
 | `Super + Shift + V` | Toggle floating |
-| `Super + Shift + R` | Toggle screen recording |
-| `Super + Shift + M` / `Super + M` | Power menu (host config may vary) |
-| `Super + I` | Installer (live ISO) |
+| `Super + Ctrl + R` / `Super + Shift + R` | Start or stop recording |
+| `Print` / `Super + Ctrl + S`, `Super + Ctrl + Shift + S` | Screenshot: a part, the whole screen |
+| `Super + Alt + X` | Copy text off the screen |
+| `Super + Shift + P` | Pick a colour on the screen |
+| `Super + Alt + C` / `Super + .` / `Super + Alt + N` / `Super + Alt + T` | Calculator / emoji / notes / timer |
+| `Super + Shift + Escape` | System monitor |
+| `Super + N` / `Super + Shift + N` | Dismiss notifications / do not disturb |
+| `Super + M` | Minimize the window, or bring the minimized ones back |
+| `Super + Shift + M` | Power menu |
 | `Super + Q` | Close window |
 
-> Keybinds can vary by host/integration; check `config/hypr/hyprland.lua` and your local Hyprland config. Many actions are also available via `qs ipc call ...`.
+> They are in `config/hypr/keybinds.lua` and `config/hypr/aequalyn/keys.lua`; Keyboard shortcuts in the control center changes them. Many actions are also available via `qs ipc call ...`.
 
 ## Wallpapers and themes from the command line
 
@@ -262,7 +271,8 @@ See [LICENSE](LICENSE) for the full text.
 
 ## Documentation
 
-- `SECURITY.md` — security model and concerns.
+- `Security.md` — security model and concerns.
 - `SKILL.md` — development/install skill reference.
 - `PLUGINS.md` — plugins (core side).
 - `THEMES.md` — themes (core side).
+- `docs/architecture.md`, `docs/lock.md`, `docs/floating.md`, `docs/quickshell-base.md` — how it works inside.
