@@ -144,10 +144,6 @@ end
 -- Load the optional floating titlebar plugin on demand (avoids startup crashes).
 if hl.bind and hl.timer then
   pcall(hl.bind, "SUPER + SHIFT + T", function()
-    hl.exec_cmd("hyprctl plugin load " .. HOME .. "/.local/lib/aequalyn/hyprbars.so")
-    pcall(hl.timer, function()
-      if _G.aequalyn_floating then _G.aequalyn_floating.load_decorations() end
-      hl.exec_cmd("qs ipc call watchdog resync || aequalyn-shell-restart")
-    end, { timeout = 1000, type = "oneshot" })
+    hl.exec_cmd("aequalyn-hyprbars load --again")
   end, { description = "Load floating titlebar" })
 end

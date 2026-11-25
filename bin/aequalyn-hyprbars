@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# aequalyn-hyprbars -- the titlebars of floating workspaces (the hyprbars plugin).
+#
+#   aequalyn-hyprbars load [--again]    load it into the running Hyprland, built first if needed
+#   aequalyn-hyprbars build <file.so>   build it for the Hyprland whose headers are installed
+#   aequalyn-hyprbars abi               which Hyprland those headers are of
+#
+# A plugin only loads into the very Hyprland it was built for, libraries included, so one file
+# for every system stops working with the next update. It is built here from vendor/hyprbars
+# (about a minute, once after such an update, with no internet needed). A build that failed is
+# not tried at every login: only when the source changes, or with --again (Super + Shift + T).
+set -euo pipefail
+
+HEADERS=${AEQUALYN_HYPR_HEADERS:-/usr/include/hyprland/src/version.h}
+DIR="$HOME/.local/lib/aequalyn"
+SO="$DIR/hyprbars.so"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/aequalyn"
+
+source_dir() {
+    local d
+    for d in ${AEQUALYN_HYPRBARS_SRC:+"$AEQUALYN_HYPRBARS_SRC"} "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../vendor/hyprbars" \
+             /usr/share/aequalyn/vendor/hyprbars /opt/aequalyn/vendor/hyprbars; do
+        if [[ -f "$d/main.cpp" ]]; then (cd "$d" && pwd); return 0; fi
+    done
+    echo "aequalyn-hyprbars: its source is not here (aequalyn-update brings it)" >&2
+    return 1
+}
+
+# as Hyprland itself puts it together: the commit, and its libraries without their patch number
+header_abi() {
+    awk '$1 == "#define" { gsub(/"/, "", $3); v[$2] = $3 }
+         function s(n) { n = v[n]; if (n == "") bad = 1; sub(/\.[^.]*$/, "", n); return n }
+         END {
+             out = v["GIT_COMMIT_HASH"] "_aq_" s("AQUAMARINE_VERSION") "_hu_" s("HYPRUTILS_VERSION") \
+                   "_hg_" s("HYPRGRAPHICS_VERSION") "_hc_" s("HYPRCURSOR_VERSION") "_hlg_" s("HYPRLANG_VERSION")
+             if (bad || v["GIT_COMMIT_HASH"] == "") exit 1
+             print out
+         }' "$HEADERS" 2>/dev/null
+}
+
+build() { # build <file.so>: and <file>.abi next to it
+    local out=$1 src abi tmp flags
+    src=$(source_dir) || return 1
+    abi=$(header_abi) || { echo "aequalyn-hyprbars: no Hyprland headers" >&2; return 1; }
+    command -v g++ >/dev/null 2>&1 && command -v pkg-config >/dev/null 2>&1 \
+        || { echo "aequalyn-hyprbars: base-devel is not installed" >&2; return 1; }
+    flags=$(pkg-config --cflags pixman-1 libdrm hyprland libinput libudev wayland-server xkbcommon lua) || return 1
+    mkdir -p "$(dirname "$out")"
+    tmp=$(mktemp "$out.XXXXXX")
+    # shellcheck disable=SC2086  # the flags are words
+    if ! nice -n 15 g++ -O2 -shared -fPIC -std=c++2b --no-gnu-unique -Wno-narrowing $flags \
+            "$src"/*.cpp -o "$tmp"; then
+        rm -f "$tmp"
+        return 1
+    fi
+    chmod 755 "$tmp"
+    # the note goes first and comes last, so it never speaks for another file
+    rm -f "${out%.so}.abi"
+    mv -f "$tmp" "$out"
+    printf '%s\n' "$abi" > "${out%.so}.abi"
+}
+
+loaded() { [[ "$(hyprctl plugin list 2>/dev/null)" == *"Plugin hyprbars"* ]]; }
+made_for() { [[ -f "$1" && "$(cat "${1%.so}.abi" 2>/dev/null)" == "$2" ]]; }
+try() { hyprctl plugin load "$SO" >/dev/null 2>&1 || true; loaded; }
+tell() { notify-send -a Aequalyn "Titlebars" "$1" >/dev/null 2>&1 || true; }
+
+get_ready() { # get_ready <abi of the running Hyprland>: loads it, however it takes
+    local abi=$1 src key built
+    if made_for "$SO" "$abi"; then try && return 0; fi
+    src=$(source_dir) || src=""
+    built="$src/built/hyprbars.so"
+    if [[ -n "$src" ]] && made_for "$built" "$abi"; then
+        mkdir -p "$DIR"
+        rm -f "${SO%.so}.abi"
+        cp -f "$built" "$SO.new" && mv -f "$SO.new" "$SO"
+        printf '%s\n' "$abi" > "${SO%.so}.abi"
+        try && return 0
+    fi
+    # one from before they were noted
+    if [[ -f "$SO" && ! -f "${SO%.so}.abi" ]] && try; then return 0; fi
+    [[ -n "$src" ]] || return 1
+    # updated, but not restarted yet: the headers are the next Hyprland's
+    if [[ "$(header_abi)" != "$abi" ]]; then
+        echo "aequalyn-hyprbars: Hyprland was updated, log in again first" >&2
+        return 1
+    fi
+    key="$abi $(cat "$src"/*.cpp "$src"/*.hpp | sha256sum | cut -d' ' -f1)"
+    mkdir -p "$CACHE"
+    if [[ $AGAIN == 0 && "$(cat "$CACHE/hyprbars.failed" 2>/dev/null)" == "$key" ]]; then return 1; fi
+    tell "Being made for this Hyprland, once. They show in about a minute."
+    if build "$SO" > "$CACHE/hyprbars.log" 2>&1 && try; then
+        rm -f "$CACHE/hyprbars.failed"
+        return 0
+    fi
+    printf '%s\n' "$key" > "$CACHE/hyprbars.failed"
+    tell "They could not be made for this Hyprland. See $CACHE/hyprbars.log"
+    return 1
+}
+
+load() {
+    local abi
+    [[ -z "${AEQUALYN_NO_FLOAT_DECORATIONS:-}" ]] || return 0
+    mkdir -p "$CACHE"
+    exec 9> "$CACHE/hyprbars.lock"
+    flock -n 9 || return 0
+    if ! loaded; then
+        abi=$(hyprctl version -j 2>/dev/null | jq -r '.abiHash // empty') || abi=""
+        get_ready "$abi" || return 1
+    fi
+    sleep 1
+    hyprctl eval "_G.aequalyn_floating.load_decorations()" >/dev/null 2>&1 || true
+    sleep 1
+    # the plugin has Hyprland number its workspaces anew: the shell reads them again. One
+    # that cannot (an older one) is restarted, though not under an open approval window
+    for _ in {1..20}; do
+        case "$(qs ipc call watchdog resync 2>/dev/null)" in ok) return 0 ;; esac
+        sleep 1
+    done
+    for _ in {1..130}; do
+        aequalyn-watchdog status --json 2>/dev/null | jq -e '(.escalations // {}) | length > 0' >/dev/null 2>&1 || break
+        sleep 1
+    done
+    aequalyn-shell-restart >/dev/null 2>&1 9>&- || true
+}
+
+AGAIN=0
+case "${1:-}" in
+    load)  [[ "${2:-}" != --again ]] || AGAIN=1; load ;;
+    build) [[ -n "${2:-}" ]] || { echo "which file?" >&2; exit 2; }; build "$2" ;;
+    abi)   header_abi ;;
+    *)     sed -n '2,12p' "$0"; exit 2 ;;
+esac

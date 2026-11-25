@@ -10,8 +10,9 @@ are tagged as managed by Aequalyn, so leaving the workspace restores their old
 state; windows the user floated by hand are left alone. If the compositor's
 window-tagging API is unavailable, the module does nothing.
 
-Decorations are optional. When `~/.local/lib/aequalyn/hyprbars.so` exists and
-loads, floating windows get a titlebar with minimize, maximize and close
+Decorations are optional. `aequalyn-hyprbars` makes the plugin for the Hyprland that
+is running (from `vendor/hyprbars`, again after a Hyprland update) and loads it. With
+it, floating windows get a titlebar with minimize, maximize and close
 buttons: green with `_` for minimize, yellow with a square for maximize, and red
 for close. A missing plugin, an older Hyprland, or
 `AEQUALYN_NO_FLOAT_DECORATIONS=1` simply leaves decorations off — none of them
