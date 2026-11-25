@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# aequalyn-builtin-themes -- the themes every installed Aequalyn has.
+# aequalyn-builtin-themes -- the built-in themes: there to be installed, a few from the start.
 #
-#   aequalyn-builtin-themes           link the built-in themes of the clone that is here
+#   aequalyn-builtin-themes           what the clone that is here has
 #   aequalyn-builtin-themes --fetch   get the clone first, if there is none (a new install)
 #
-# Which ones they are is builtin.list in aequalyn-themes. They stay in the clone that
-# aequalyn-update keeps ($SRC/aequalyn-themes) and are linked into /usr/share/aequalyn/themes,
-# so they take their space once and every update brings their newest. A theme that is a
-# folder of its own there is left alone; a link whose theme is gone is removed.
+# The built-in themes are those of the clone that aequalyn-update keeps ($SRC/aequalyn-themes):
+# the Store lists them from it, and installs the ones a user wants. The few in its builtin.list
+# are on every system from the start, linked into /usr/share/aequalyn/themes; a folder of its
+# own there is left alone. A link that is not in the list (there was a time every theme was
+# linked) goes, unless someone here wears that theme or one of its wallpapers.
 # Not for the live ISO, which has its own themes only.
 set -euo pipefail
 
@@ -50,7 +51,25 @@ while IFS= read -r id; do
     [[ -e "$DIR/$id" && ! -L "$DIR/$id" ]] && continue
     ln -sfn "$CLONE/themes/$id" "$DIR/$id"
 done < "$CLONE/builtin.list"
+# worn by someone: the theme itself, or a wallpaper of it
+worn() { # worn <id>
+    local home f
+    for home in "${HOMES[@]}"; do
+        [[ "$(cat "$home/.config/quickshell/theme.conf" 2>/dev/null)" == "theme:$1" ]] && return 0
+        [[ "$(readlink "$home/.config/aequalyn/current/theme" 2>/dev/null)" == */themes/"$1" ]] && return 0
+        for f in .config/quickshell/wallpaper.conf .config/aequalyn/settings.json .local/state/aequalyn/wallpaper.json; do
+            grep -qF "/themes/$1/" "$home/$f" 2>/dev/null && return 0
+        done
+    done
+    return 1
+}
+HOMES=(/home/* /root)
+[[ -z "${AEQUALYN_HOMES:-}" ]] || HOMES=("$AEQUALYN_HOMES"/*)
 for l in "$DIR"/*; do
-    [[ -L "$l" && "$(readlink "$l")" == "$CLONE/"* && ! -e "$l" ]] && rm -f "$l"
+    [[ -L "$l" && "$(readlink "$l")" == "$CLONE/"* ]] || continue
+    if [[ ! -e "$l" ]]; then rm -f "$l"; continue; fi
+    id=${l##*/}
+    sed -e 's/#.*//' -e 's/[[:space:]]//g' "$CLONE/builtin.list" | grep -qxF -- "$id" && continue
+    worn "$id" || rm -f "$l"
 done
 exit 0

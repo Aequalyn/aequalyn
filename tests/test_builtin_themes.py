@@ -31,7 +31,9 @@ with tempfile.TemporaryDirectory() as tmp:
     root, src = tmp / "share", tmp / "lib/src"
     (root / "themes/aequalyn").mkdir(parents=True)
     (root / "themes/aequalyn/mine").write_text("x")
-    env = dict(os.environ, AEQUALYN_ROOT=str(root), AEQUALYN_SRC=str(src), AEQUALYN_GIT="file://%s" % (tmp / "git"))
+    homes = tmp / "homes"
+    (homes / "u/.config/quickshell").mkdir(parents=True)
+    env = dict(os.environ, AEQUALYN_HOMES=str(homes), AEQUALYN_ROOT=str(root), AEQUALYN_SRC=str(src), AEQUALYN_GIT="file://%s" % (tmp / "git"))
 
     def run(*args, script=TOOL, **extra):
         return subprocess.run(["unshare", "-r", "bash", str(script), *args], env=dict(env, **extra), capture_output=True, text=True, timeout=60)
@@ -55,6 +57,28 @@ with tempfile.TemporaryDirectory() as tmp:
     (tmp / "aequalyn-themes").write_text(text)
     r = subprocess.run(["bash", str(tmp / "aequalyn-themes"), "list"], env={"HOME": str(home), "PATH": os.environ["PATH"]}, capture_output=True, text=True)
     ok([x.split()[0] for x in r.stdout.splitlines()] == ["aequalyn", "one", "one-day"], "listed: " + r.stdout + r.stderr)
+    # themes that were linked when every theme was: they go, unless someone wears them
+    def linked(*ids):
+        for i in ids:
+            if not (root / "themes" / i).exists():
+                (root / "themes" / i).symlink_to(src / "aequalyn-themes/themes" / i)
+
+    conf, full = homes / "u/.config/quickshell", (src / "aequalyn-themes/builtin.list").read_text()
+    (src / "aequalyn-themes/builtin.list").write_text("aequalyn  # only\n")
+    linked("one", "other")
+    ok(run().returncode == 0 and there() == ["aequalyn"], "nothing but the list is there from the start: %s" % there())
+    linked("one", "one-day", "other")
+    (conf / "theme.conf").write_text("theme:one")
+    (conf / "wallpaper.conf").write_text("/usr/share/aequalyn/themes/other/backgrounds/1.jpg")
+    ok(run().returncode == 0 and there() == ["aequalyn", "one", "other"], "a worn theme, and one whose wallpaper is on, stay: %s" % there())
+    (conf / "theme.conf").write_text("wallpaper")
+    (conf / "wallpaper.conf").unlink()
+    (homes / "u/.config/aequalyn/current").mkdir(parents=True)
+    (homes / "u/.config/aequalyn/current/theme").symlink_to("/usr/share/aequalyn/themes/other")
+    ok(run().returncode == 0 and there() == ["aequalyn", "other"], "until they are not worn any more: %s" % there())
+    (homes / "u/.config/aequalyn/current/theme").unlink()
+    (src / "aequalyn-themes/builtin.list").write_text(full)
+    ok(run().returncode == 0 and there() == ["aequalyn", "one", "one-day"], "the list decides")
     # a theme that is gone, and a link that is not ours
     (root / "themes/theirs").symlink_to("/nowhere")
     (src / "aequalyn-themes/builtin.list").write_text("one\n")
