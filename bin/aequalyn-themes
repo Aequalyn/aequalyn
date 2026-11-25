@@ -69,50 +69,68 @@ backgrounds_of() { # backgrounds_of <dir>
     find -L "$1/backgrounds" -maxdepth 1 -type f -regextype posix-extended -iregex "$MEDIA_RE" | sort -V
 }
 
-pretty() { # tokyo-night -> Tokyo Night
-    printf '%s' "$1" | sed -E 's/[-_]+/ /g; s/\b(.)/\u\1/g'
-}
-
-# colors.toml: key = "#rrggbb" lines -> {"key": "#rrggbb", ...}
-toml_colors() {
-    sed -n -E 's/^[[:space:]]*([A-Za-z0-9_]+)[[:space:]]*=[[:space:]]*"(#[0-9A-Fa-f]{6})".*/\1\t\2/p' "$1" \
-        | jq -R -s 'split("\n") | map(select(length > 0) | split("\t") | {(.[0]): .[1]}) | add // {}'
-}
-
-theme_json() { # theme_json <id> <dir>
-    local id=$1 dir=$2 meta='{}' colors='null' bgs preview=""
-    [[ -f "$dir/theme.json" ]] && meta=$(jq -c . "$dir/theme.json" 2>/dev/null || echo '{}')
-    [[ -f "$dir/colors.toml" ]] && colors=$(toml_colors "$dir/colors.toml")
-    bgs=$(backgrounds_of "$dir" | jq -R -s 'split("\n") | map(select(length > 0))')
-    for f in preview.png preview.jpg preview.webp; do
-        [[ -f "$dir/$f" ]] && { preview="$dir/$f"; break; }
-    done
-    jq -n -c \
-        --arg id "$id" --arg dir "$dir" --arg pretty "$(pretty "$id")" --arg preview "$preview" \
-        --argjson meta "$meta" --argjson colors "$colors" --argjson bgs "$bgs" '
-        {
-          id: $id,
-          dir: $dir,
-          name: ($meta.name // $pretty),
-          family: ($meta.family // (if $colors != null then "Folder" else "Aequalyn" end)),
-          author: ($meta.author // ""),
-          variant: ($meta.variant // ""),
-          palette: ($meta.palette // null),
-          colors: $colors,
-          backgrounds: $bgs,
-          preview: (if $preview != "" then $preview else ($bgs[0] // "") end),
-          kind: (if ($meta.palette // $colors) == null then "pack" else "theme" end)
-        }'
-}
-
 cmd_list() {
-    local json=0 id dir
-    [[ "${1:-}" == "--json" ]] && json=1
-    if [[ $json -eq 1 ]]; then
-        { while IFS=$'\t' read -r id dir; do theme_json "$id" "$dir"; done < <(theme_dirs); } | jq -s -c .
+    local id dir
+    if [[ "${1:-}" == "--json" ]]; then
+        theme_dirs | themes_json
     else
         while IFS=$'\t' read -r id dir; do printf '%-24s %s\n' "$id" "$dir"; done < <(theme_dirs)
     fi
+}
+
+# every theme ("id<TAB>dir" lines) as one JSON array, in one go: the shell reads it as it
+# starts, and a few programs for each of a hundred themes took seconds
+themes_json() {
+    python3 -c '
+import json, os, re, subprocess, sys
+media = re.compile(sys.argv[1], re.I)
+rows = [l.split("\t", 1) for l in sys.stdin.read().splitlines() if "\t" in l]
+bgs = {}
+for _, d in rows:
+    b = os.path.join(d, "backgrounds")
+    try:
+        names = os.listdir(b)
+    except OSError:
+        names = []
+    bgs[d] = [p for p in (b + "/" + n for n in names) if media.fullmatch(p) and os.path.isfile(p)]
+# in the order `sort -V` gives
+paths = [p for v in bgs.values() for p in v if "\n" not in p]
+out = subprocess.run(["sort", "-V"], input="\n".join(paths) + "\n" if paths else "", capture_output=True, text=True,
+                     encoding="utf-8", errors="surrogateescape").stdout
+rank = {p: i for i, p in enumerate(out.splitlines())}
+def first(*v):
+    return next((x for x in v if x is not None and x is not False), None)
+res = []
+for tid, d in rows:
+    meta, colors = {}, None
+    try:
+        with open(d + "/theme.json", encoding="utf-8") as f:
+            meta = json.load(f)
+    except (OSError, ValueError):
+        pass
+    if not isinstance(meta, dict):
+        meta = {}
+    try:
+        with open(d + "/colors.toml", encoding="utf-8", errors="replace") as f:
+            colors = {}
+            for line in f:
+                m = re.match(r"\s*([A-Za-z0-9_]+)\s*=\s*\"(#[0-9A-Fa-f]{6})\"", line)
+                if m:
+                    colors[m[1]] = m[2]
+    except OSError:
+        pass
+    b = sorted((p for p in bgs[d] if p in rank), key=rank.get)
+    preview = next((p for p in (d + "/preview." + e for e in ("png", "jpg", "webp")) if os.path.isfile(p)), "")
+    palette = first(meta.get("palette"))
+    res.append({"id": tid, "dir": d,
+                "name": first(meta.get("name"), re.sub(r"\b(.)", lambda m: m[1].upper(), re.sub(r"[-_]+", " ", tid))),
+                "family": first(meta.get("family"), "Folder" if colors is not None else "Aequalyn"),
+                "author": first(meta.get("author"), ""), "variant": first(meta.get("variant"), ""),
+                "palette": palette, "colors": colors, "backgrounds": b,
+                "preview": preview or (b[0] if b else ""),
+                "kind": "pack" if palette is None and colors is None else "theme"})
+print(json.dumps(res, ensure_ascii=False, separators=(",", ":")))
+' "$MEDIA_RE"
 }
 
 cmd_current() {
