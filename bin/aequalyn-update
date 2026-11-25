@@ -51,6 +51,8 @@ main() {
 
     SUDO=""
     [[ $EUID -ne 0 ]] && SUDO=sudo
+    # whatever mask this was started under: what it writes is for every user to read
+    umask 022
 
     # Say where it stopped: a failed step leaves everything after it as it was.
     step="starting"
@@ -117,9 +119,8 @@ main() {
         $SUDO mv "$2.new" "$2"
     }
 
-    # Themes, package lists and the installer. The built-in themes are always there; of
-    # the others only those this machine already has are refreshed: which ones are
-    # installed is the user's choice.
+    # Themes, package lists and the installer. Only the themes this machine already has are
+    # refreshed: which ones are installed is the user's choice (the Store offers them all).
     apply_sources() {
         local t name
         step="applying the newest themes"
