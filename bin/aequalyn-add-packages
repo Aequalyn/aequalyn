@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# aequalyn-add-packages -- the apps chosen in the installer that it could not install.
+#
+#   aequalyn-add-packages                    what is waiting in /etc/aequalyn/packages.pending
+#   aequalyn-add-packages --profile <name>   a profile's apps (casual, dev, creative, gaming,
+#                                            student, work, ai), at any time
+#
+# An install without internet has the base system only: what its profiles add is written
+# down, and added by aequalyn-packages.service at the first start with internet. A name the
+# repositories do not know is left out; anything else that fails is tried again later.
+set -euo pipefail
+umask 022
+
+ROOT=${AEQUALYN_ROOT:-/usr/share/aequalyn}
+PENDING=${AEQUALYN_PENDING:-/etc/aequalyn/packages.pending}
+say() { printf '[aequalyn-add-packages] %s\n' "$*"; }
+
+[[ $EUID -eq 0 ]] || { echo "aequalyn-add-packages: needs root (sudo)" >&2; exit 1; }
+case "${1:-}" in
+    "") ;;
+    --profile)
+        list="$ROOT/packages/profiles/${2:-}.packages"
+        [[ "${2:-}" =~ ^[a-z]+$ && -f "$list" ]] || { echo "aequalyn-add-packages: no profile '${2:-}'" >&2; exit 2; }
+        mkdir -p "$(dirname "$PENDING")"
+        sed -e 's/#.*//' -e 's/[[:space:]]//g' "$list" | grep -v '^$' >> "$PENDING"
+        ;;
+    *) sed -n '2,11p' "$0"; exit 2 ;;
+esac
+[[ -s "$PENDING" ]] || { rm -f "$PENDING"; exit 0; }
+
+for _ in {1..30}; do
+    ping -c1 -W2 archlinux.org >/dev/null 2>&1 && break
+    sleep 2
+done
+ping -c1 -W2 archlinux.org >/dev/null 2>&1 || { say "no internet yet"; exit 1; }
+# another pacman (an update, the install's own first-start units) goes first
+for _ in {1..120}; do [[ -e /var/lib/pacman/db.lck ]] || break; sleep 5; done
+
+# an offline install has no Arch keys before its first time online
+if ! pacman-key --list-keys >/dev/null 2>&1 || [[ -e /etc/aequalyn/offline-install ]]; then
+    pacman-key --init >/dev/null 2>&1 || true
+    pacman-key --populate archlinux >/dev/null 2>&1 || true
+fi
+pacman -Sy --noconfirm >/dev/null 2>&1 || { say "the package databases could not be fetched"; exit 1; }
+
+want=()
+while IFS= read -r p; do
+    [[ "$p" =~ ^[a-z0-9@._+-]+$ && "$p" != -* ]] || continue
+    if pacman -Sp --print-format '%n' "$p" >/dev/null 2>&1; then want+=("$p"); else say "$p is not in the repositories: left out"; fi
+done < <(sort -u "$PENDING")
+(( ${#want[@]} )) || { rm -f "$PENDING"; exit 0; }
+
+# with everything else brought up to date: new packages on an older system are of two ages
+say "installing: ${want[*]}"
+if ! pacman -Su --needed --noconfirm "${want[@]}"; then
+    # one that cannot be installed must not keep the others out
+    say "not all at once: one by one"
+    pacman -Su --noconfirm || { say "the system could not be updated"; exit 1; }
+    for p in "${want[@]}"; do pacman -S --needed --noconfirm "$p" || true; done
+fi
+left=()
+for p in "${want[@]}"; do pacman -Qq "$p" >/dev/null 2>&1 || pacman -Qqg "$p" >/dev/null 2>&1 || left+=("$p"); done
+done_n=$(( ${#want[@]} - ${#left[@]} ))
+if (( ${#left[@]} )); then printf '%s\n' "${left[@]}" > "$PENDING"; else rm -f "$PENDING"; fi
+
+# say so to whoever is logged in
+for dir in /run/user/*; do
+    uid=${dir##*/}
+    [[ "$uid" =~ ^[0-9]+$ && "$uid" -ge 1000 && -S "$dir/bus" ]] || continue
+    runuser -u "$(id -un "$uid")" -- env DBUS_SESSION_BUS_ADDRESS="unix:path=$dir/bus" \
+        notify-send -a Aequalyn "Your apps are ready" "$done_n packages chosen in the installer were added." 2>/dev/null || true
+done
+(( ${#left[@]} == 0 )) || { say "still missing: ${left[*]}"; exit 1; }
