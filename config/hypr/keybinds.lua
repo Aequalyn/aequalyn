@@ -41,6 +41,9 @@ hl.bind(M .. " + CTRL + B",       hl.dsp.exec_cmd("qs ipc call quickLooks bar"))
 hl.bind(M .. " + CTRL + D",       hl.dsp.exec_cmd("qs ipc call quickLooks dock"))      -- Quick looks: docks
 hl.bind(M .. " + CTRL + K",       hl.dsp.exec_cmd("qs ipc call quickLooks lock"))      -- Quick looks: lock screen
 hl.bind(M .. " + CTRL + G",       hl.dsp.exec_cmd("qs ipc call quickLooks login"))      -- Quick looks: login screen
+hl.bind(M .. " + CTRL + C",       hl.dsp.exec_cmd("qs ipc call quickLooks cursor"))      -- Quick looks: cursor
+hl.bind(M .. " + CTRL + W",       hl.dsp.exec_cmd("qs ipc call quickLooks showcase"))      -- Quick looks: Showcase
+hl.bind(M .. " + CTRL + M",       hl.dsp.exec_cmd("qs ipc call quickLooks all"))      -- Quick looks: one look everywhere
 -- Window layouts: Super + L steps through them, the control center shows them all
 hl.bind(M .. " + L",         hl.dsp.exec_cmd("aequalyn-layout next"))
 hl.bind(M .. " + SHIFT + L", hl.dsp.exec_cmd("aequalyn-layout prev"))
