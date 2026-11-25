@@ -117,19 +117,24 @@ main() {
         $SUDO mv "$2.new" "$2"
     }
 
-    # Themes, package lists and the installer. Only the themes this machine already
-    # has are refreshed: which ones are installed is the user's choice.
+    # Themes, package lists and the installer. The built-in themes are always there; of
+    # the others only those this machine already has are refreshed: which ones are
+    # installed is the user's choice.
     apply_sources() {
         local t name
         step="applying the newest themes"
         for t in "$SRC_DIR/aequalyn-themes/themes"/*/; do
             [[ -d "$t" ]] || continue
             t=${t%/}; name=${t##*/}
-            [[ -d "$AQ_ROOT/themes/$name" ]] && swap_dir "$t" "$AQ_ROOT/themes/$name"
+            # a built-in theme is a link to this clone: it is the newest already
+            [[ -d "$AQ_ROOT/themes/$name" && ! -L "$AQ_ROOT/themes/$name" ]] && swap_dir "$t" "$AQ_ROOT/themes/$name"
             if [[ -d "$HOME/.local/share/aequalyn/themes/$name" ]]; then
                 cp -r "$t/." "$HOME/.local/share/aequalyn/themes/$name/"
             fi
         done
+        if [[ -x "$AQ_ROOT/bin/aequalyn-builtin-themes" ]]; then
+            $SUDO env AEQUALYN_ROOT="$AQ_ROOT" AEQUALYN_SRC="$SRC_DIR" bash "$AQ_ROOT/bin/aequalyn-builtin-themes"
+        fi
         step="applying the newest package lists"
         if [[ -d "$SRC_DIR/aequalyn-pkgs/lists" ]]; then
             $SUDO mkdir -p "$AQ_ROOT/packages"
