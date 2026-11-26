@@ -20,6 +20,19 @@ else
     read -r -a homes <<< "$AEQUALYN_MIGRATION_HOMES"
 fi
 
+# As root, each home is edited by its owner (this script again, for that home alone): a
+# symlink planted in a home can then only lead to what its owner may write anyway.
+if [[ $EUID -eq 0 && -z ${AEQUALYN_MIGRATION_AS_USER:-} ]]; then
+    for home in "${homes[@]}"; do
+        [[ -d $home ]] || continue
+        owner=$(stat -c %U "$home" 2>/dev/null) || continue
+        runuser -u "$owner" -- env AEQUALYN_MIGRATION_AS_USER=1 AEQUALYN_MIGRATION_HOMES="$home" bash "$(readlink -f "$0")" \
+            || printf '\033[0;33m[%s]\033[0m %s\n' "20261126-4" "$home: could not be updated; it is left as it was" >&2
+    done
+    printf '\033[0;32m[%s]\033[0m %s\n' "20261126-4" "migration 20261126-4 complete"
+    exit 0
+fi
+
 info() { printf '\033[0;34m[20261126-4]\033[0m %s\n' "$*"; }
 
 MANUAL='hl.bind(M .. " + F1",             hl.dsp.exec_cmd("qs ipc call manual toggle"))       -- Manual'
@@ -51,4 +64,4 @@ for home in "${homes[@]}"; do
         info "$f: Super + Alt + K opens the keyboard shortcuts"
     fi
 done
-printf '\033[0;32m[20261126-4]\033[0m %s\n' "migration 20261126-4 complete"
+[[ -n ${AEQUALYN_MIGRATION_AS_USER:-} ]] || printf '\033[0;32m[20261126-4]\033[0m %s\n' "migration 20261126-4 complete"
