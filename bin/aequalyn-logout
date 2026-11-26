@@ -5,10 +5,14 @@
 #   aequalyn-logout sweep    stop every other process of this login (run by the
 #                            session wrappers before they start a fresh desktop)
 #
-# With SDDM autologin on for this user and the desktop started by an Aequalyn
-# session wrapper (aequalyn-session, or aequalyn-live-session on the ISO), log
-# out asks the wrapper for a fresh desktop: no greeter, as on boot. Otherwise it
-# ends the logind session and SDDM shows its greeter.
+# Under an Aequalyn session wrapper (aequalyn-session, or aequalyn-live-session
+# on the ISO), log out stops the desktop and the wrapper exits cleanly, so SDDM
+# shows its greeter. With SDDM autologin on for this user, it asks the wrapper
+# for a fresh desktop instead: no greeter, as on boot.
+#
+# loginctl terminate-session is only a fallback outside a wrapper: it kills
+# sddm-helper too, which then exits 1 (HELPER_AUTH_ERROR to SDDM), and SDDM
+# never restarts its greeter: a black screen.
 #
 # SDDM's own Relogin stays off: it cannot tell a log out from a crash, and would
 # loop forever on a desktop that cannot start. A bare Hyprland exit is never
@@ -68,10 +72,10 @@ esac
 wpid="" lpid="" wsid=""
 read -r wpid lpid wsid < "$state" 2>/dev/null || true
 if [[ $wpid =~ ^[0-9]+$ && $lpid =~ ^[0-9]+$ && $wsid == "${XDG_SESSION_ID:-}" ]] \
-    && kill -0 "$wpid" 2>/dev/null && autologin_on; then
-    : > "$marker"
+    && kill -0 "$wpid" 2>/dev/null; then
+    autologin_on && : > "$marker"
     # start-hyprland passes the TERM on to Hyprland (a clean exit) and quits;
-    # the wrapper then sweeps the login and starts a fresh desktop.
+    # the wrapper then starts a fresh desktop (marker) or exits for the greeter.
     kill -TERM "$lpid" 2>/dev/null && exit 0
     rm -f "$marker"
 fi

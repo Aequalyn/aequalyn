@@ -3,7 +3,9 @@
 # assets/wayland-sessions/aequalyn.desktop).
 #
 # Runs start-hyprland. When it ends, so does the login and SDDM shows its
-# greeter: SDDM's Relogin stays off, so a desktop that crashes or cannot start
+# greeter. This always exits 0: sddm-helper exits with the session's code, and
+# SDDM reads 1 as an authentication error and never restarts the greeter.
+# SDDM's Relogin stays off, so a desktop that crashes or cannot start
 # lands on the greeter instead of looping. The one exception is a log out with
 # SDDM autologin on: aequalyn-logout leaves the marker below and stops the
 # desktop, and this starts a fresh one in the same login, as if SDDM had logged
@@ -14,7 +16,7 @@
 
 main() {
     set -u
-    local run marker state here launcher rc=0
+    local run marker state here launcher
     run=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
     marker=$run/aequalyn-relogin
     state=$run/aequalyn-session.pid
@@ -24,12 +26,12 @@ main() {
         start-hyprland "$@" &
         launcher=$!
         printf '%s %s %s\n' "$$" "$launcher" "${XDG_SESSION_ID:-}" > "$state"
-        wait "$launcher"; rc=$?
+        wait "$launcher"
         [[ -f $marker ]] || break
         "$here/aequalyn-logout" sweep
     done
     rm -f "$state" "$marker"
-    return "$rc"
+    return 0
 }
 
 main "$@"
