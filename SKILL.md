@@ -24,13 +24,13 @@ The project is split across github.com/Aequalyn:
 
 ## Repository layout (core repo)
 
-- `bin/` — 43 installable helpers (`~/.local/bin`): `aequalyn`, `aequalyn-update`, `aequalyn-session-start`, `aequalyn-shell-restart`, `aequalyn-settings`, `aequalyn-import`/`export-settings`, `aequalyn-default-apps`, `aequalyn-hypr-apply`, `aequalyn-idle`, `aequalyn-dpms`, `aequalyn-repaint`, `aequalyn-wallpaper`, `aequalyn-temperature`, `aequalyn-record`, `aequalyn-bluetooth-audio`, `aequalyn-clipboard-*`, `aequalyn-theme`, `aequalyn-apply-palette`, `aequalyn-themes`, `aequalyn-browser-theme`, `aequalyn-lockscreen`, `aequalyn-lock-info`/`media`, `aequalyn-sddm`, `aequalyn-plymouth-calibrate`, `aequalyn-layout`, `aequalyn-screenshot`, `aequalyn-detect`, `aequalyn-pkg-install`, `aequalyn-pkg-aur-install`, `aequalyn-snapshot`, `aequalyn-provision-user`, `aequalyn-ai-tool`, `aequalyn-store`, `aequalyn-webapp`, `aequalyn-qt5-dialogs`, `aequalyn-nautilus-palette`, `aequalyn-askpass`, plus legacy `bin/20261509*.sh`.
+- `bin/` — 43 installable helpers (`~/.local/bin`): `aequalyn`, `aequalyn-update`, `aequalyn-session-start`, `aequalyn-shell-restart`, `aequalyn-settings`, `aequalyn-import`/`export-settings`, `aequalyn-default-apps`, `aequalyn-hypr-apply`, `aequalyn-idle`, `aequalyn-dpms`, `aequalyn-repaint`, `aequalyn-wallpaper`, `aequalyn-temperature`, `aequalyn-record`, `aequalyn-bluetooth-audio`, `aequalyn-clipboard-*`, `aequalyn-theme`, `aequalyn-apply-palette`, `aequalyn-themes`, `aequalyn-browser-theme`, `aequalyn-lockscreen`, `aequalyn-lock-info`/`media`, `aequalyn-sddm`, `aequalyn-plymouth-calibrate`, `aequalyn-layout`, `aequalyn-screenshot`, `aequalyn-detect`, `aequalyn-pkg-install`, `aequalyn-pkg-aur-install`, `aequalyn-snapshot`, `aequalyn-provision-user`, `aequalyn-ai-tool`, `aequalyn-store`, `aequalyn-webapp`, `aequalyn-qt5-dialogs`, `aequalyn-nautilus-palette`, `aequalyn-askpass`.
 - `config/` — templates copied to `~/.config`: Hyprland Lua (`hyprland.lua` + modules), matugen, kitty, foot, fuzzel, qt6ct, btop, fastfetch, gtk-3/4, hyprlock, nautilus-python, quickshell seeds, `aequalyn/settings.json`, `aequalyn/layouts.json`.
 - `docs/` — `architecture.md`, `quickshell-base.md` (stale upstream doc; replace/remove), `floating.md`, layout screenshots.
 - `migrations/` — 16 dated shell migrations (`20261116-2.sh` … `20261122-6.sh`), run as root by `aequalyn-update` in sorted order, recorded in `/var/lib/aequalyn/migrations.done`. Exit `0` done, `3` retry later, other stops update.
 - `tests/` — `test_layouts.py`, `test_hypr.py` (needs `lupa`), `test_floating.py` (uses system `lua`).
 - `assets/` — default wallpaper `beach.jpg`, webapp icons, SDDM theme assets.
-- `scripts/` — `layouts-json.py` (regenerates `config/aequalyn/layouts.json` from `geometry.lua`), legacy `20261509.sh`.
+- `scripts/` — `layouts-json.py` (regenerates `config/aequalyn/layouts.json` from `geometry.lua`).
 - `plymouth/` — boot splash theme.
 - `install.sh` — installs Aequalyn into a target home (`--skel` for `/etc/skel`).
 - `VERSION` (`0.1.0`), `LICENSE` (GPL-3.0), `README.md`, `Security.md`, `SKILL.md`, `PLUGINS.md`, `THEMES.md`.
