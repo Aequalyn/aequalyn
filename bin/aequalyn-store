@@ -275,7 +275,7 @@ def builtin_ids():
 PKG_NAME_RE = re.compile(r"^[A-Za-z0-9@_+][A-Za-z0-9@._+-]{0,127}$")
 
 
-def do_gate_pkg():
+def do_gate_pkg(expect: str):
     if os.geteuid() != 0:
         raise Fail("gate-pkg needs root: the gate runs it, never a person")
     user = os.environ.get("SUDO_USER", "")
@@ -287,9 +287,14 @@ def do_gate_pkg():
         raise Fail(f"no home for {user}")
     stage = home / ".local" / "state" / "aequalyn" / "gate" / "pkg.json"
     try:
-        d = json.loads(stage.read_text())
+        raw = stage.read_bytes()
+        d = json.loads(raw)
     except (OSError, ValueError) as e:
         raise Fail(f"the staged request is unreadable: {e}")
+    # the approval window showed this exact list (aequalyn-watchdog read it and passed
+    # its sha256): a list changed after that is refused, never installed
+    if not re.fullmatch(r"[0-9a-f]{64}", expect) or hashlib.sha256(raw).hexdigest() != expect:
+        raise Fail("the staged packages are not the ones that were approved")
     op, names = d.get("op", ""), d.get("packages", [])
     if op not in ("install", "remove") or not isinstance(names, list) \
             or not (1 <= len(names) <= 32):
@@ -2057,7 +2062,9 @@ def main(argv):
         do_open_appimage(args[1])
         return 0
     if cmd == "gate-pkg":
-        do_gate_pkg()
+        if len(args) != 3 or args[1] != "--expect":
+            raise Fail("usage: gate-pkg --expect <sha256 of the approved request>")
+        do_gate_pkg(args[2])
         return 0
     if cmd == "set-appimage-handler":
         if len(args) != 1:
