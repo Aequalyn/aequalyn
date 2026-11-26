@@ -23,6 +23,29 @@ SESSION_LOG="$STATE_DIR/session.log"
 log() { printf '[aequalyn-session] %s\n' "$*" >> "$SESSION_LOG" 2>/dev/null || true; }
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
+# 0. An automatic login on a disk that is not encrypted: lock at once. Without a disk
+#    password typed at boot, autologin would hand the desktop to whoever turns the
+#    machine on. The lock comes up before anything else starts, once per Hyprland
+#    session (this script runs again on every shell restart). The live ISO is left
+#    alone: its autologin is another file, and it has no password to unlock with.
+on_encrypted() { # <path>: true when it lives on a dm-crypt device
+    local src
+    src=$(findmnt -nvo SOURCE -T "$1" 2>/dev/null) || return 1
+    [[ $src == /dev/* ]] || return 1
+    lsblk -nrso TYPE "$src" 2>/dev/null | grep -qx crypt
+}
+AUTOLOCK_MARK="$XDG_RUNTIME_DIR/aequalyn-autolock-${HYPRLAND_INSTANCE_SIGNATURE:-session}"
+if [[ ! -e $AUTOLOCK_MARK && ! -d /run/archiso ]] \
+        && grep -qsx "User=$(id -un)" /etc/sddm.conf.d/aequalyn-autologin.conf \
+        && ! { on_encrypted / && on_encrypted "$HOME"; }; then
+    : > "$AUTOLOCK_MARK" 2>/dev/null || true
+    if command -v aequalyn-lock >/dev/null 2>&1 && aequalyn-lock lock >/dev/null 2>&1; then
+        log "automatic login on a disk that is not encrypted: locked at once"
+    else
+        log "automatic login on a disk that is not encrypted: the lock could not start"
+    fi
+fi
+
 # 1. Desktop services (Polkit, portals, keyring)
 if command -v systemctl >/dev/null 2>&1; then
     # hyprpolkitagent SIGSEGVs on some GPUs (notably virtio-gpu VMs) when it
