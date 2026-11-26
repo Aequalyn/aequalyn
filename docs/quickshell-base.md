@@ -176,12 +176,11 @@ ThemeSwitcher {
 bind = SUPER, T, exec, qs ipc call theme toggle
 ```
 
-4. add this to your kitty config so the theme switcher can update kitty colors:
+4. add this to the end of your kitty config so the theme switcher can update kitty colors
+   (it writes the file and sends kitty SIGUSR1; remote control stays off):
 
 ```conf
-allow_remote_control yes
-listen_on unix:/tmp/kitty-{kitty_pid}
-include theme-colors.conf
+globinclude theme-preview.conf
 ```
 
 #### KDE integration

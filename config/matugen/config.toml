@@ -28,7 +28,7 @@ post_hook = "command -v hyprctl >/dev/null 2>&1 && hyprctl reload >/dev/null 2>&
 [templates.kitty]
 input_path = "~/.config/matugen/templates/kitty-colors.conf"
 output_path = "~/.config/kitty/aequalyn-colors.conf"
-post_hook = "for s in /tmp/kitty-*; do [ -S \"$s\" ] && kitty @ --to \"unix:$s\" set-colors --all --configured ~/.config/kitty/aequalyn-colors.conf 2>/dev/null; done; true"
+post_hook = "rm -f ~/.config/kitty/theme-preview.conf; pkill -USR1 -x kitty 2>/dev/null; true"
 
 [templates.foot]
 input_path = "~/.config/matugen/templates/foot-colors.ini"
