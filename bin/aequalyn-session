@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# aequalyn-session -- the Aequalyn desktop session (SDDM's "Aequalyn" entry,
+# assets/wayland-sessions/aequalyn.desktop).
+#
+# Runs start-hyprland. When it ends, so does the login and SDDM shows its
+# greeter: SDDM's Relogin stays off, so a desktop that crashes or cannot start
+# lands on the greeter instead of looping. The one exception is a log out with
+# SDDM autologin on: aequalyn-logout leaves the marker below and stops the
+# desktop, and this starts a fresh one in the same login, as if SDDM had logged
+# the user straight back in.
+#
+# One function, called on the last line: bash has then read the whole script,
+# so an update replacing this file while the session runs cannot break it.
+
+main() {
+    set -u
+    local run marker state here launcher rc=0
+    run=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+    marker=$run/aequalyn-relogin
+    state=$run/aequalyn-session.pid
+    here=$(dirname "$(readlink -f "$0")")
+    while :; do
+        rm -f "$marker"
+        start-hyprland "$@" &
+        launcher=$!
+        printf '%s %s %s\n' "$$" "$launcher" "${XDG_SESSION_ID:-}" > "$state"
+        wait "$launcher"; rc=$?
+        [[ -f $marker ]] || break
+        "$here/aequalyn-logout" sweep
+    done
+    rm -f "$state" "$marker"
+    return "$rc"
+}
+
+main "$@"
+exit

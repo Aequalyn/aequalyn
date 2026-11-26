@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# aequalyn-logout -- log out of the desktop.
+#
+#   aequalyn-logout          log out (the shell's Log out buttons run this)
+#   aequalyn-logout sweep    stop every other process of this login (run by the
+#                            session wrappers before they start a fresh desktop)
+#
+# With SDDM autologin on for this user and the desktop started by an Aequalyn
+# session wrapper (aequalyn-session, or aequalyn-live-session on the ISO), log
+# out asks the wrapper for a fresh desktop: no greeter, as on boot. Otherwise it
+# ends the logind session and SDDM shows its greeter.
+#
+# SDDM's own Relogin stays off: it cannot tell a log out from a crash, and would
+# loop forever on a desktop that cannot start. A bare Hyprland exit is never
+# used either: start-hyprland can take it for a crash and restart Hyprland in
+# the same login, which skipped SDDM on every other log out.
+set -u
+
+run=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+marker=$run/aequalyn-relogin       # "start a fresh desktop", read by the wrapper
+state=$run/aequalyn-session.pid    # "<wrapper pid> <start-hyprland pid> <session id>"
+
+# SDDM autologin is on for this user: an [Autologin] User= line naming them.
+autologin_on() {
+    local f
+    local -a files=()
+    for f in /etc/sddm.conf /etc/sddm.conf.d/*.conf; do [[ -r $f ]] && files+=("$f"); done
+    (( ${#files[@]} )) || return 1
+    awk -v u="User=$(id -un)" '
+        FNR == 1 { s = "" }
+        /^\[/    { s = $0 }
+        s == "[Autologin]" && $0 == u { f = 1 }
+        END      { exit !f }' "${files[@]}"
+}
+
+# Stop every process of this login that this user owns, except this one and its
+# ancestors (the wrapper, SDDM's helper): TERM, about three seconds, then KILL.
+sweep() {
+    local cg p round any keep=" "
+    local -a procs
+    cg=$(sed -n 's/^0:://p' /proc/self/cgroup)
+    [[ $cg == */session-*.scope ]] || return 0
+    p=$$
+    while [[ $p =~ ^[0-9]+$ ]] && (( p > 1 )); do
+        keep+="$p "
+        p=$(awk '/^PPid:/ { print $2 }' "/proc/$p/status" 2>/dev/null)
+    done
+    for round in 0 1 2 3 4 5 6 7 8 9 10; do
+        mapfile -t procs 2>/dev/null < "/sys/fs/cgroup$cg/cgroup.procs" || return 0
+        any=0
+        for p in "${procs[@]}"; do
+            [[ $keep == *" $p "* || ! -O /proc/$p ]] && continue
+            any=1
+            if (( round == 0 )); then kill -TERM "$p"
+            elif (( round == 10 )); then kill -KILL "$p"; fi
+        done 2>/dev/null
+        (( any )) || return 0
+        sleep 0.3
+    done
+}
+
+case "${1:-}" in
+    sweep) sweep; exit 0 ;;
+    "") ;;
+    *) echo "usage: aequalyn-logout [sweep]" >&2; exit 2 ;;
+esac
+
+wpid="" lpid="" wsid=""
+read -r wpid lpid wsid < "$state" 2>/dev/null || true
+if [[ $wpid =~ ^[0-9]+$ && $lpid =~ ^[0-9]+$ && $wsid == "${XDG_SESSION_ID:-}" ]] \
+    && kill -0 "$wpid" 2>/dev/null && autologin_on; then
+    : > "$marker"
+    # start-hyprland passes the TERM on to Hyprland (a clean exit) and quits;
+    # the wrapper then sweeps the login and starts a fresh desktop.
+    kill -TERM "$lpid" 2>/dev/null && exit 0
+    rm -f "$marker"
+fi
+if [[ -n ${XDG_SESSION_ID:-} ]] && loginctl terminate-session "$XDG_SESSION_ID" 2>/dev/null; then
+    exit 0
+fi
+exec hyprctl dispatch 'hl.dsp.exit()'
