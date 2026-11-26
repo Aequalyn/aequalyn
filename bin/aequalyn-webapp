@@ -79,9 +79,9 @@ DESKTOP_PREFIX = "aequalyn-webapp-"
 GENERIC_ICON = "applications-internet"
 
 # Letters already used by Aequalyn's own Super + Shift bindings (window
-# movement, recording, power menu, ...). Web app keys never take these.
-RESERVED_KEYS = set("ACLMNORSWV")
-FREE_KEYS = "BDEFGHIJKPQTUXYZ"
+# movement, recording, power menu, color picker, titlebars, ...). Web app keys never take these.
+RESERVED_KEYS = set("ACLMNOPRSTWV")
+FREE_KEYS = "BDEFGHIJKQUXYZ"
 
 # The categories a web app starts with: (id, label, extra desktop Categories). Every web
 # app keeps Network;WebBrowser; the extra ones come after. The user's own list (in
@@ -166,7 +166,7 @@ DEFAULT_APPS = [
      "key": "G", "icon": "aequalyn-webapp-chatgpt",
      "category": "ai"},
     {"name": "YouTube", "slug": "youtube", "url": "https://www.youtube.com/",
-     "key": "T", "icon": "aequalyn-webapp-youtube",
+     "key": "U", "icon": "aequalyn-webapp-youtube",
      "category": "video"},
     {"name": "YouTube Music", "slug": "youtube-music",
      "url": "https://music.youtube.com/", "key": "Y",
@@ -400,6 +400,17 @@ def pick_key(cfg: dict, name: str) -> str:
         if ch not in used:
             return ch
     return ""
+
+
+def free_reserved_keys(cfg: dict) -> bool:
+    """Give an app whose key is one of Aequalyn's own Super + Shift keys a free one."""
+    changed = False
+    for app in cfg.get("apps", []):
+        if str(app.get("key") or "").upper() in RESERVED_KEYS:
+            others = {"apps": [a for a in cfg["apps"] if a is not app]}
+            app["key"] = pick_key(others, app.get("name", ""))
+            changed = True
+    return changed
 
 
 def shortcut(key: str) -> str:
@@ -859,7 +870,7 @@ def sync(cfg: dict):
     DESKTOP_DIR.mkdir(parents=True, exist_ok=True)
     browser = resolve_browser(cfg)
     wanted = set()
-    changed = False
+    changed = free_reserved_keys(cfg)
     for app in cfg.get("apps", []):
         icon = app.get("icon") or ""
         if not icon or (icon.startswith(DESKTOP_PREFIX) and not icon_file(icon)):
