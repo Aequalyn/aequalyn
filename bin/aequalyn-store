@@ -271,7 +271,8 @@ def builtin_ids():
 # aequalyn-watchdog exec-root; the approval window decides; and THIS runs,
 # as root, with nothing from the user side trusted beyond strict validation.
 
-PKG_NAME_RE = re.compile(r"^[A-Za-z0-9@._+-]{1,128}$")
+# a package name never starts with "-" or ".": one that did would be read as a pacman option
+PKG_NAME_RE = re.compile(r"^[A-Za-z0-9@_+][A-Za-z0-9@._+-]{0,127}$")
 
 
 def do_gate_pkg():
@@ -297,9 +298,9 @@ def do_gate_pkg():
         if not PKG_NAME_RE.match(str(n)):
             raise Fail(f"not a plain package name: {n}")
     argv = (["pacman", "-S", "--needed", "--noconfirm"] if op == "install"
-            else ["pacman", "-Rns", "--noconfirm"]) + [str(n) for n in names]
+            else ["pacman", "-Rns", "--noconfirm"]) + ["--"] + [str(n) for n in names]
     step(("Installing " if op == "install" else "Removing ") + ", ".join(names))
-    r = subprocess.run(argv, capture_output=True, text=True)
+    r = subprocess.run(argv, capture_output=True, text=True, cwd="/")
     if r.stdout.strip():
         say(r.stdout.rstrip())
     if r.stderr.strip():
