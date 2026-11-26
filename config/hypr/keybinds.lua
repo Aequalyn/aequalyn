@@ -80,6 +80,7 @@ hl.bind(M .. " + SHIFT + M", hl.dsp.exec_cmd("qs ipc call power toggle"))
 -- The built-in pack (shell plugins). Each key does something only while its plugin is
 -- on: control center › Plugins.
 hl.bind(M .. " + SLASH",          hl.dsp.exec_cmd("qs ipc call keyHints toggle"))     -- Key hints
+hl.bind(M .. " + F1",             hl.dsp.exec_cmd("qs ipc call manual toggle"))       -- Manual
 hl.bind(M .. " + SHIFT + SPACE",  hl.dsp.exec_cmd("qs ipc call palette toggle"))      -- Command palette
 hl.bind(M .. " + ALT + C",        hl.dsp.exec_cmd("qs ipc call calculator toggle"))   -- Calculator
 hl.bind(M .. " + PERIOD",         hl.dsp.exec_cmd("qs ipc call emoji toggle"))        -- Emoji
@@ -88,6 +89,9 @@ hl.bind(M .. " + ALT + N",        hl.dsp.exec_cmd("qs ipc call notes toggle"))  
 hl.bind(M .. " + SHIFT + ESCAPE", hl.dsp.exec_cmd("qs ipc call sysmon toggle"))       -- System monitor
 hl.bind(M .. " + ALT + X",        hl.dsp.exec_cmd("qs ipc call screenText capture"))  -- Copy text from the screen
 hl.bind(M .. " + ALT + T",        hl.dsp.exec_cmd("qs ipc call timer toggle"))        -- Timer
+-- The Keyboard shortcuts page's own key. It is fixed (the page cannot change it), so it
+-- is not a plain hl.bind line: the page lists only the keys it can change.
+pcall(hl.bind, M .. " + ALT + K", hl.dsp.exec_cmd("qs ipc call aequalyn page keybinds"), { description = "Keyboard shortcuts" })
 -- NOTE: Super + Alt + F is already bound to Aequalyn FM above, so the Focus toggle
 -- (Super + Alt + F in upstream) is intentionally not added to avoid an overlap.
 
