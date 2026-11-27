@@ -155,7 +155,10 @@ mv "$_qs_new" "$_qs"
 # the same for skel and the live user, but install.sh must also handle a shell
 # cloned here by aequalyn-update or a live ISO whose source tree was stripped.
 chmod 755 "$TARGET/.config/quickshell/plugins/clipboard/capture.sh" \
-          "$TARGET/.config/quickshell/tools/watchdog/aequalyn-watchdog" 2>/dev/null || true
+          "$TARGET/.config/quickshell/tools/watchdog/aequalyn-watchdog" \
+          "$TARGET/.config/quickshell/tools/wifi/aequalyn-wifi-eap" \
+          "$TARGET/.config/quickshell/tools/wifi/aequalyn-wifi-speed" \
+          "$TARGET/.config/quickshell/tools/wifi/aequalyn-wifi-secrets" 2>/dev/null || true
 for d in "$TARGET"/.config/quickshell/plugins/*/bin "$TARGET"/.config/quickshell/plugins/*/daemon; do
     [[ -d $d ]] && chmod 755 "$d"/* 2>/dev/null || true
 done
@@ -330,6 +333,25 @@ if [[ -f "$WD" ]]; then
     ln -sfn ../../.config/quickshell/tools/watchdog/aequalyn-watchdog "$TARGET/.local/bin/aequalyn-watchdog"
     [[ -n "$OWNER" ]] && chown -h "$OWNER" "$TARGET/.local/bin/aequalyn-watchdog" 2>/dev/null || true
     info "watchdog -> $TARGET/.local/bin/aequalyn-watchdog"
+fi
+
+# Enterprise (eduroam) Wi-Fi helper, used by Settings when restricted networks
+# are allowed. Same relative-link reasoning as the watchdog above.
+EAP="$TARGET/.config/quickshell/tools/wifi/aequalyn-wifi-eap"
+if [[ -f "$EAP" ]]; then
+    chmod 755 "$EAP" 2>/dev/null || true
+    mkdir -p "$TARGET/.local/bin"
+    ln -sfn ../../.config/quickshell/tools/wifi/aequalyn-wifi-eap "$TARGET/.local/bin/aequalyn-wifi-eap"
+    [[ -n "$OWNER" ]] && chown -h "$OWNER" "$TARGET/.local/bin/aequalyn-wifi-eap" 2>/dev/null || true
+    info "wifi-eap -> $TARGET/.local/bin/aequalyn-wifi-eap"
+fi
+SPEED="$TARGET/.config/quickshell/tools/wifi/aequalyn-wifi-speed"
+if [[ -f "$SPEED" ]]; then
+    chmod 755 "$SPEED" 2>/dev/null || true
+    mkdir -p "$TARGET/.local/bin"
+    ln -sfn ../../.config/quickshell/tools/wifi/aequalyn-wifi-speed "$TARGET/.local/bin/aequalyn-wifi-speed"
+    [[ -n "$OWNER" ]] && chown -h "$OWNER" "$TARGET/.local/bin/aequalyn-wifi-speed" 2>/dev/null || true
+    info "wifi-speed -> $TARGET/.local/bin/aequalyn-wifi-speed"
 fi
 
 # 4. Wallpaper + first-run state
