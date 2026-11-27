@@ -67,6 +67,7 @@ hl.bind(M .. " + I",       hl.dsp.exec_cmd("qs ipc call installMenu toggle")) --
 hl.bind(M .. " + R",       hl.dsp.exec_cmd("qs ipc call removeMenu toggle")) -- Remove chooser
 hl.bind(M .. " + N",       hl.dsp.exec_cmd("qs ipc call notifications dismiss_all"))
 hl.bind(M .. " + SHIFT + N", hl.dsp.exec_cmd("qs ipc call notifications dnd_toggle"))
+hl.bind(M .. " + CTRL + N",  hl.dsp.exec_cmd("qs ipc call notifications history")) -- Re-read saved notifications
 hl.bind(M .. " + SHIFT + R", hl.dsp.exec_cmd("aequalyn-record toggle"))
 
 -- Windows
