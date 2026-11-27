@@ -106,6 +106,8 @@ aequalyn/
 ## Install onto an existing Arch + Hyprland system
 
 ```sh
+git clone https://github.com/Aequalyn/aequalyn.git
+cd aequalyn
 ./install.sh                 # installs into $HOME
 qs -n -d                     # start the shell
 aequalyn-theme ~/Pictures/Wallpapers/beach.jpg
