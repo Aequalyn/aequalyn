@@ -273,6 +273,12 @@ main() {
         $SUDO mv -f "$BIN_DIR/.$n.new" "$BIN_DIR/$n"
     done
     $SUDO chmod 755 "$BIN_DIR"/aequalyn-* 2>/dev/null || true
+    # The root half of Settings > Wi-Fi > Reveal password lives in the shell: the gate runs
+    # it by its absolute path (Plugins.js), so root's copy comes from root's shell tree.
+    if [[ -f "$SHELL_DIR/tools/wifi/aequalyn-wifi-secrets" ]]; then
+        $SUDO install -m 0755 "$SHELL_DIR/tools/wifi/aequalyn-wifi-secrets" "$BIN_DIR/.aequalyn-wifi-secrets.new"
+        $SUDO mv -f "$BIN_DIR/.aequalyn-wifi-secrets.new" "$BIN_DIR/aequalyn-wifi-secrets"
+    fi
 
     echo "==> running migrations"
     step="running migrations"
